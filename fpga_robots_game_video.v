@@ -28,7 +28,8 @@
 // The tile image memory contains 128 tiles, each 8x8 pixels, each pixel
 // 4 bits (RGBI encoding, R is the low bit, I the high bit).
 
-// XXX this has been coded, but not tested, either real world or simulation
+// XXX this has been coded, but not tested; only the timings have
+// been tested in simulation
 
 module fpga_robots_game_video(
     // system interface
