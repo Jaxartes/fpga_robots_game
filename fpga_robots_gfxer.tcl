@@ -16,8 +16,6 @@
 
 # Colors won't be reproduced exactly, far from it.
 
-# XXX
-
 # check the command line
 if {[llength $argv] != 3} {
     puts stderr "ARGS: tile-map-filename input-filename output-filename"
@@ -165,7 +163,7 @@ for {set y 0} {$y < 768} {incr y} {
             -to $x $y
     }
 }
-canvas .preview -width 1034 -height 778 -background black
+canvas .preview -width 1034 -height 778 -background darkgray
 .preview create image 5 5 -image preview -anchor nw
 pack .preview
 
