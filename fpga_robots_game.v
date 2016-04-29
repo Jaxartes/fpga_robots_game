@@ -29,8 +29,8 @@ module fpga_robots_game(
     // determined by the XGA video output timings, with a 65MHz pixel clock.
 
     wire clk, clklck;
-    fpga_robots_game_clock clock( // XXX create this module
-        .iclk(board_clk), .oclk(clk), locked(clklck)
+    fpga_robots_game_clock clock(
+        .iclk(board_clk), .oclk(clk), .locked(clklck)
     );
 
     // Reset.  Driven by the reset button and the clock's "LOCKED" signal.
@@ -65,12 +65,33 @@ module fpga_robots_game(
             blink_state <= { blink_state[14:0], blink_state[15] };
     always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
 
+    // Video output generator.  It owns the "tile map" memory which is also
+    // used by the game play logic.
+    fpga_robots_game_video video(
+        // system interface
+        .clk(clk), .rst(rst),
+
+        // video output
+        .v_red(o_video_r[3:2]),
+        .v_grn(o_video_g[3:2]),
+        .v_blu(o_video_b[3:2]),
+        .v_hsy(o_hsync),
+        .v_vsy(o_vsync),
+
+        // tile map memory access
+            // XXX this is dummy & not really filled in
+        .tm_adr(13'd0),
+        // .tm_red(XXX),
+        .tm_wrt(8'd0),
+        .tm_wen(1'd0)
+    );
+
+    // convert 6 bit to 12 bit color
+    assign o_video_r[1:0] = o_video_r[3:2];
+    assign o_video_g[1:0] = o_video_g[3:2];
+    assign o_video_b[1:0] = o_video_b[3:2];
+
     // Dummy signals: eventually hook these up or something XXX
-    assign o_video_r = 3'd0;
-    assign o_video_g = 3'd0;
-    assign o_video_b = 3'd0;
-    assign o_vsync = 1'd1;
-    assign o_hsync = 1'd1;
     assign serial_tx = 1'd1;
     assign o_audio_l = 1'd0;
     assign o_audio_r = 1'd0;

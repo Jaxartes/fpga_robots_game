@@ -1,0 +1,10 @@
+notes on copyright holders other than Jeremy Dilatush
+
+in my current tile set I've got text images derived from:
+    "FreeSerif" for the "Robots!" title
+    "8x16" for numbers and field headers
+        Copyright 1987, 1988, 1989 Sony Corp.
+        I don't know of an English language name for this font.
+        It's long been used in X11.
+        where another name for it is:
+        -Sony-Fixed-Medium-R-Normal--16-120-100-100-C-80-ISO8859-1

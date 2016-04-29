@@ -46,9 +46,7 @@ module fpga_robots_game_video(
     input     [12:0] tm_adr,        // address
     output reg [7:0] tm_red = 8'd0, // data read from last address
     input            tm_wrt,        // data to be written
-    input            tm_wen,        // enable write
-    // animation control
-    input [2:0] animode // select tile from sets of eight for animated robots
+    input            tm_wen        // enable write
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -133,6 +131,10 @@ module fpga_robots_game_video(
     reg [9:0]s2_y = 10'd0;
     always @(posedge clk) s2_x <= rst ? 11'd0 : s1_x;
     always @(posedge clk) s2_y <= rst ? 10'd0 : s1_y;
+
+    // Animation: Each game play tile is selected from eight equivalent
+    // tile images.
+    wire [2:0]animode = 3'd0; // XXX temporary; should really animate
 
     // if this is in the leftmost 120 grid columns (960 pixels): play area
     wire [1:0]s2_pa_what = s2_y[3] ? s2_tm_red_v[3:2] : s2_tm_red_v[1:0];
