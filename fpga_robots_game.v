@@ -18,7 +18,7 @@ module fpga_robots_game(
     output o_vsync,
     output o_hsync,
     input serial_rx, // serial port with host (perhaps over USB)
-    output reg serial_tx = 1'd1,
+    output serial_tx,
     inout ps2a_clk, // PS/2 port A
     inout ps2a_dat,
     output o_audio_l, // audio output

@@ -17,6 +17,11 @@
 # Colors won't be reproduced exactly, far from it.
 
 # check the command line
+set overwrite 0
+if {[lindex $argv 0] eq "overwrite"} {
+    set overwrite 1
+    set argv [lrange $argv 1 end]
+}
 if {[llength $argv] != 3} {
     puts stderr "ARGS: tile-map-filename input-filename output-filename"
     exit 1
@@ -24,7 +29,7 @@ if {[llength $argv] != 3} {
 set tile_map_filename [lindex $argv 0]
 set input_filename [lindex $argv 1]
 set output_filename [lindex $argv 2]
-if {[file exists $output_filename]} {
+if {[file exists $output_filename] && !$overwrite} {
     puts stderr "'$output_filename' already exists, sorry"
     exit 1
 }
@@ -173,9 +178,15 @@ pack .btn
 proc do_write {} {
     # Write the tile image file: 4,096 hex bytes, one per line, each
     # containing two pixels from tile_pix()
-    global tile_pix output_filename
+    global tile_pix output_filename overwrite
 
-    set fp [open $output_filename {WRONLY CREAT EXCL}]
+    if {$overwrite} {
+        set mode {WRONLY CREAT}
+    } else {
+        set mode {WRONLY CREAT EXCL}
+    }
+
+    set fp [open $output_filename $mode]
     for {set i 0} {$i < 4096} {incr i} {
         set pix1 $tile_pix([expr {$i << 1}])
         set pix2 $tile_pix([expr {($i << 1) | 1}])

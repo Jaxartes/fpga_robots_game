@@ -134,7 +134,7 @@ module fpga_robots_game_video(
 
     // Animation: Each game play tile is selected from eight equivalent
     // tile images.
-    wire [2:0]animode = 3'd0; // XXX temporary; should really animate
+    wire [2:0]animode = 3'd0; // XXX temporary; do animation or get rid of it
 
     // if this is in the leftmost 120 grid columns (960 pixels): play area
     wire [1:0]s2_pa_what = s2_y[3] ? s2_tm_red_v[3:2] : s2_tm_red_v[1:0];

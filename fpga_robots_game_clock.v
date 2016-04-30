@@ -13,6 +13,11 @@ module fpga_robots_game_clock(
     output locked // indicate if it's "locked" thus ready to run
 );
 
+`ifdef __ICARUS__
+    // Dummy clock for Icarus Verilog
+    assign oclk = iclk;
+    assign locked = 1'd1;
+`else
     // For Papilio Pro, and other boards with a Xilinx Spartan-6, two
     // or more PLLs available, and a 32MHz clock input:
     // Generate a 65MHz clock using two PLLs.
@@ -64,4 +69,5 @@ module fpga_robots_game_clock(
     // asynchonous, and it's hard to synchronize them if we might not be
     // able to rely on our clock...
     wire clklck = 1'd1;
+`endif
 endmodule
