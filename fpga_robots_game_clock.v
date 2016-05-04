@@ -7,10 +7,21 @@
 // different for every FPGA vendor and product type (the Papilio Pro uses
 // a Xilinx Spartan-6).
 
+// It also generates a few synchronous pulse trains to time other things
+// that happen in the system, like the serial port.
+
 module fpga_robots_game_clock(
+    // main clock
     input iclk, // input clock, probably coming from an oscillator somewhere
     output oclk, // output clock, to be used by the game's logic
-    output locked // indicate if it's "locked" thus ready to run
+    output locked, // indicate if it's "locked" thus ready to run
+
+    // serial port timing: for 115,200 baud
+    output baud1, // single clock cycle pulse 115,200 times a second
+    output baud8, // single clock cycle pulse 921,600 times a second
+
+    // PS/2 port timing
+    output sixus  // single clock cycle pulse every ~6 microseconds
 );
 
 `ifdef __ICARUS__
@@ -68,5 +79,19 @@ module fpga_robots_game_clock(
     // asynchonous, and it's hard to synchronize them if we might not be
     // able to rely on our clock...
     wire clklck = 1'd1;
-`endif
+`endif // !__ICARUS__
+
+    // Serial port timing, for 115,200 baud.  This assumes 65MHz system clock.
+    reg [18:0] baudctr = 19'd0;
+    wire [19:0] baudctr_nxt = baudctr + 19'd929;
+    always @(posedge oclk) baudctr <= baudctr_nxt[18:0];
+    assign baud1 = baudctr_nxt[19];
+    assign baud8 = baudctr_nxt[16] ^ baudctr[16];
+
+    // PS/2 port timing, for a pulse every ~6us.  This assumes 65MHz system
+    // clock.  Uses the fact that baud8 pulses about every microsecond.
+    reg [2:0]sixctr = 3'd0;
+    always @(posedge oclk) if (baud8) sixctr <= { sixctr[1:0], ~sixctr[2] };
+    assign sixus = (sixctr == 3'd7);
+
 endmodule
