@@ -3,7 +3,7 @@
 
 VERILOG=fpga_robots_game.v fpga_robots_game_clock.v fpga_robots_game_video.v
 
-build: a.out tile_images.mem
+build: a.out tile_images.mem key_table.mem
 
 # clean: Remove some generated files.
 clean:
@@ -19,3 +19,6 @@ tile_images.mem: tile_images.png
 	wish fpga_robots_gfxer.tcl overwrite \
             tile_map_init.mem tile_images.png tile_images.mem
 
+# key_table.mem: Information about keyboard scancodes.
+key_table.mem: key_table_gen.tcl
+	tclsh key_table_gen.tcl verbose > key_table.mem

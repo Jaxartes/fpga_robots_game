@@ -33,7 +33,6 @@ module fpga_robots_game_clock(
     BUFG outbuf1(.I(ocub1), .O(clk52));
     BUFG outbuf2(.I(ocub2), .O(oclk));
 
-    // XXX deal with locked including sync if needed
     PLL_BASE #(
         //  pll1: 32MHz -> 52MHz; oscillator 416MHz; ratio 13/8
         .CLKIN_PERIOD(31.25), // 31.250 ns means 32MHz, input clock frequency
