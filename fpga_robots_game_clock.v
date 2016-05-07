@@ -50,13 +50,13 @@ module fpga_robots_game_clock(
         .DIVCLK_DIVIDE(1),    // feed 32MHz to the PLL input
         .CLKFBOUT_MULT(13),   // run the VCO at 32*13=416MHz (ideal seems to be
                               // a little over 400MHz)
-        .CLKOUT0_DIVIDE(32)   // and give output 0, 416MHz / 8 = 52MHz
+        .CLKOUT0_DIVIDE(8)    // and give output 0, 416MHz / 8 = 52MHz
     ) pll1 (
         .CLKIN(iclk),         // input clock
         .CLKOUT0(ocub1),      // output clock
         .CLKFBIN(fb1),        // feedback to keep the PLL running
         .CLKFBOUT(fb1),
-        .RST(0)               // I guess you need to keep it from
+        .RST(1'd0)            // I guess you need to keep it from
                               // resetting itself...
     );
 
@@ -71,19 +71,21 @@ module fpga_robots_game_clock(
         .CLKOUT0(ocub2),      // output clock
         .CLKFBIN(fb2),        // feedback to keep the PLL running
         .CLKFBOUT(fb2),
-        .RST(0)               // I guess you need to keep it from
+        .RST(1'd0)            // I guess you need to keep it from
                               // resetting itself...
     );
 
     // fake "locked" signal, we could use the two "LOCKED" outputs but they're
     // asynchonous, and it's hard to synchronize them if we might not be
     // able to rely on our clock...
-    wire clklck = 1'd1;
+    assign locked = 1'd1;
+
+    parameter BAUDCTR_STEP = 19'd929; // appropriate for 65MHz
 `endif // !__ICARUS__
 
-    // Serial port timing, for 115,200 baud.  This assumes 65MHz system clock.
+    // Serial port timing, for 115,200 baud.
     reg [18:0] baudctr = 19'd0;
-    wire [19:0] baudctr_nxt = baudctr + 19'd929;
+    wire [19:0] baudctr_nxt = baudctr + BAUDCTR_STEP;
     always @(posedge oclk) baudctr <= baudctr_nxt[18:0];
     assign baud1 = baudctr_nxt[19];
     assign baud8 = baudctr_nxt[16] ^ baudctr[16];

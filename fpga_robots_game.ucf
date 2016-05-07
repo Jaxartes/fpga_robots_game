@@ -33,7 +33,7 @@ CONFIG PROHIBIT=P60;
 # clock source
 NET board_clk      LOC="P94"  | IOSTANDARD=LVTTL | PERIOD=31.25ns;
 # LEDs and buttons
-NET led1           LOC="P112" | IOSTANDARD=LVTTL | DRIVE=8 | SLEW=SLOW;
+NET board_led      LOC="P112" | IOSTANDARD=LVTTL | DRIVE=8 | SLEW=SLOW;
 NET i_reset        LOC="P85"  | IOSTANDARD=LVTTL | PULLDOWN;
 # video output
 NET o_video_b(0)   LOC="P99"  | IOSTANDARD=LVTTL | DRIVE=8 | SLEW=FAST;

@@ -39,14 +39,14 @@ module fpga_robots_game_video(
     output reg [1:0] v_red = 2'd0, // "red" color signal
     output reg [1:0] v_grn = 2'd0, // "green" color signal
     output reg [1:0] v_blu = 2'd0, // "blue" color signal
-    output reg       v_hsy = 1'd0, // horizontal sync signal
-    output reg       v_vsy = 1'd0, // vertical sync signal
+    output reg       v_hsy = 1'd1, // horizontal sync signal
+    output reg       v_vsy = 1'd1, // vertical sync signal
     // outside access to tile map memory
     //      all outputs delayed by one clock from their corresponding inputs
     input     [12:0] tm_adr,        // address
     output reg [7:0] tm_red = 8'd0, // data read from last address
-    input            tm_wrt,        // data to be written
-    input            tm_wen        // enable write
+    input      [7:0] tm_wrt,        // data to be written
+    input            tm_wen         // enable write
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -129,12 +129,27 @@ module fpga_robots_game_video(
     // tile.  That gives eight clock cycles to compute the pseudo random
     // number function, which makes it a lot easier to develop one.
     wire [2:0]s2_animode;
+    reg [15:0]s2_anictr = 16'd0;
     pseudorandom_20_3 anirand(
         .clk(clk), .rst(rst),
-        .inp({ s1_x[9:3], s1_y[9:3], 6'd0 }), // XXX add the frame value
+        .inp({ s1_x[9:3], // X coord of cell *before* the one affected
+               s1_y[9:3], // Y coord of cell *before* the one affected
+               s2_anictr[15:10] }), // changes as the animation progresses
         .out(s2_animode),
         .stb(s1_x[2:0] == 3'd0)
     );
+
+    // Timing of the animation: Advanced every video frame by some
+    // fraction of an animation frame, configurable as a parameter
+    parameter ANIMATION_SPEED = 16'd68; // 17 = about once a second
+    always @(posedge clk)
+        if (rst)
+            s2_anictr <= 16'd0;
+        else if (s1_x_wrap && s1_y_wrap) // s1_{x,y}_wrap are one cycle ahead
+                                         // what should be used here, but it
+                                         // won't make any difference since
+                                         // it only affects an invisible pixel
+            s2_anictr <= s2_anictr + ANIMATION_SPEED;
 
     // // // //
     // Stage 2: Decode what we got from the tile map, to decide what tile
@@ -156,8 +171,8 @@ module fpga_robots_game_video(
     // if this is in the rightmost 120 grid columns (64 pixels): status area
     // pairs of tiles, 0-63, or 0-31 plus invisible "tag" 2-7
     wire [6:0]s2_sa_tile = {
-        (s2_tm_red_v[7:6] == 2'd3) ? 1'd0 : s2_tm_red_v[5],
-        s2_tm_red_v[4:0],
+        (s2_tm_red_v[7:6] != 2'd0) ? 2'd0 : s2_tm_red_v[5:4],
+        s2_tm_red_v[3:0],
         s2_y[3]
     };
 
