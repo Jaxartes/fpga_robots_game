@@ -12,15 +12,15 @@ if {[lindex $argv 0] eq "verbose"} {
 # Table of what keys have meaning.
 # format: label-list flag-list
 set meanings {
-    {"Y" "KP 7"}           {repeat turn nw}
-    {"K" "KP 8" "U ARROW"} {repeat turn n}
-    {"U" "KP 9"}           {repeat turn ne}
-    {"H" "KP 4" "L ARROW"} {repeat turn w}
-    {"." "KP 5" "KP ."}    {repeat turn}
-    {"L" "KP 6" "R ARROW"} {repeat turn e}
-    {"B" "KP 1"}           {repeat turn sw}
-    {"J" "KP 2" "D ARROW"} {repeat turn s}
-    {"N" "KP 3"}           {repeat turn se}
+    {"Y" "KP 7"}           {turn nw}
+    {"K" "KP 8" "U ARROW"} {turn n}
+    {"U" "KP 9"}           {turn ne}
+    {"H" "KP 4" "L ARROW"} {turn w}
+    {"." "KP 5" "KP ."}    {turn}
+    {"L" "KP 6" "R ARROW"} {turn e}
+    {"B" "KP 1"}           {turn sw}
+    {"J" "KP 2" "D ARROW"} {turn s}
+    {"N" "KP 3"}           {turn se}
     {"W" "KP 0"}           wait
     {"T" "KP *"}           teleport
     {"Q" "ESC" "BKSP"}     quit
@@ -29,16 +29,21 @@ set meanings {
      "L ALT" "R ALT"
      "L GUI" "R GUI"
      "NUM"}                modifier
+    "F1"                   fn1
+    "F2"                   fn2
+    "F3"                   fn3
 }
 
 # and what bit field encodes each flag
 array set flag_codes {
     modifier 0x8000
-    repeat   0x4000
-    teleport 0x2000
-    wait     0x1000
-    turn     0x0800
-    quit     0x0400
+    teleport 0x4000
+    wait     0x2000
+    turn     0x1000
+    quit     0x0800
+    fn3      0x0400
+    fn2      0x0200
+    fn1      0x0100
         e      0x80
         se     0x40
         s      0x20
