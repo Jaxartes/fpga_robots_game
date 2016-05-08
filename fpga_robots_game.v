@@ -30,7 +30,9 @@ module fpga_robots_game(
 
     wire clk, clklck;
     fpga_robots_game_clock clock(
-        .iclk(board_clk), .oclk(clk), .locked(clklck)
+        .iclk(board_clk), .oclk(clk), .locked(clklck),
+        // XXX hook up baud1, baud8, sixus
+        .anitog(anitog)
     );
 
     // Reset.  Driven by the reset button and the clock's "LOCKED" signal.
@@ -63,7 +65,8 @@ module fpga_robots_game(
             blink_state <= 16'd17;
         else if (blink_inc[22])
             blink_state <= { blink_state[14:0], blink_state[15] };
-    always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
+//    always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
+always @* board_led = anitog;
 
     // Video output generator.  It owns the "tile map" memory which is also
     // used by the game play logic.
@@ -83,7 +86,10 @@ module fpga_robots_game(
         .tm_adr(13'd0),
         // .tm_red(XXX),
         .tm_wrt(8'd0),
-        .tm_wen(1'd0)
+        .tm_wen(1'd0),
+
+        // control animation
+        .anitog(anitog)
     );
 
     // convert 6 bit to 12 bit color

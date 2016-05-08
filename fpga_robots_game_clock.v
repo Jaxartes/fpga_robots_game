@@ -21,7 +21,10 @@ module fpga_robots_game_clock(
     output baud8, // single clock cycle pulse 921,600 times a second
 
     // PS/2 port timing
-    output sixus  // single clock cycle pulse every ~6 microseconds
+    output sixus, // single clock cycle pulse every ~6 microseconds
+
+    // frame by frame animated video
+    output anitog // will flip flop every so often
 );
 
 `ifdef __ICARUS__
@@ -95,5 +98,14 @@ module fpga_robots_game_clock(
     reg [2:0]sixctr = 3'd0;
     always @(posedge oclk) if (baud8) sixctr <= { sixctr[1:0], ~sixctr[2] };
     assign sixus = (sixctr == 3'd7);
+
+    // Animated video; the clock for it is run off the 115,200 baud serial  
+    // clock.
+    parameter ANIMATION_RATE = 20'd5; // 5 here means 1.1Hz
+    reg [19:0] anictr = 20'd0;
+    always @(posedge oclk)
+        if (baud1)
+            anictr <= anictr + ANIMATION_RATE;
+    assign anitog = anictr[19];
 
 endmodule

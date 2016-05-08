@@ -28,9 +28,6 @@
 // The tile image memory contains 128 tiles, each 8x8 pixels, each pixel
 // 4 bits (RGBI encoding, R is the low bit, I the high bit).
 
-// XXX this has been coded, but not tested; only the timings have
-// been tested in simulation, and the animation PRNG
-
 module fpga_robots_game_video(
     // system interface
     input clk, // clock signal: about 65MHz; everything happens on rising edge
@@ -46,7 +43,9 @@ module fpga_robots_game_video(
     input     [12:0] tm_adr,        // address
     output reg [7:0] tm_red = 8'd0, // data read from last address
     input      [7:0] tm_wrt,        // data to be written
-    input            tm_wen         // enable write
+    input            tm_wen,        // enable write
+    // anitog: toggle this value when it's time for a new animation frame
+    input anitog
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -125,41 +124,68 @@ module fpga_robots_game_video(
     // // // //
     // Stages 1-2: Animation control.  For each game play tile there are
     // eight variants, and we'll choose between them based on a pseudo
-    // random number function based on the coordinates of the *previous*
-    // tile.  That gives eight clock cycles to compute the pseudo random
-    // number function, which makes it a lot easier to develop one.
-    wire [2:0]s2_animode;
-    reg [15:0]s2_anictr = 16'd0;
-    pseudorandom_20_3 anirand(
-        .clk(clk), .rst(rst),
-        .inp({ s1_x[9:3], // X coord of cell *before* the one affected
-               s1_y[9:3], // Y coord of cell *before* the one affected
-               s2_anictr[15:10] }), // changes as the animation progresses
-        .out(s2_animode),
-        .stb(s1_x[2:0] == 3'd0)
-    );
+    // random number generator (PRNG).  Using the PRNG is complicated
+    // by the fact that we want to use the same value for all the pixels
+    // in an 8x8 grid cell, and to continue to do so for several video
+    // frames.
 
-    // Timing of the animation: Advanced every video frame by some
-    // fraction of an animation frame, configurable as a parameter
-    parameter ANIMATION_SPEED = 16'd68; // 17 = about once a second
+    // PRNG state, it's always used to control the animation
+    reg [19:0]s2_prng_state = 20'd1;
+    wire [2:0]s2_animode = s2_prng_state[2:0];
+
+    // And a possible next state in the LFSR is computed from it
+    wire [19:0]s2_prng_succ;
+    lfsr_20_3 aniprng(.in(s2_prng_state), .out(s2_prng_succ));
+
+    // Figuring out where we are on the screen (at stage 1), it matters
+    reg s1_west = 1'd0;
+    always @(posedge clk) s1_west <= s1_x_wrap;
+    reg s1_northwest = 1'd0;
+    always @(posedge clk) s1_northwest <= s1_x_wrap && s1_y_wrap;
+
+    // A state machine manages changes of s2_prng_state at various points
+    // in time, and copying to/from a few saved copies of s2_prng_state.
+    reg [19:0]s2_prng_frame = 20'd1; // changes between frames if at all
+    reg [19:0]s2_prng_line = 20'd1; // changes between scan lines if at all
+    reg s2_anitog_fol = 1'd0; // follows 'anitog' when animation frame is done
     always @(posedge clk)
-        if (rst)
-            s2_anictr <= 16'd0;
-        else if (s1_x_wrap && s1_y_wrap) // s1_{x,y}_wrap are one cycle ahead
-                                         // what should be used here, but it
-                                         // won't make any difference since
-                                         // it only affects an invisible pixel
-            s2_anictr <= s2_anictr + ANIMATION_SPEED;
+        if (rst) begin
+            s2_prng_state <= 20'd1;
+            s2_prng_frame <= 20'd1;
+            s2_prng_line <= 20'd1;
+            s2_anitog_fol <= 1'd0;
+        end else begin
+            if (s1_northwest) begin
+                // new video frame
+                s2_prng_state <= s2_prng_frame;
+                if (s2_anitog_fol != anitog) begin
+                    // and new animation frame
+                    s2_prng_frame <= s2_prng_succ;
+                    s2_prng_line <= s2_prng_frame;
+                    s2_anitog_fol <= anitog;
+                end
+            end else if (s1_west) begin
+                // new scan line
+                s2_prng_state <= s2_prng_line;
+                // XXX new line
+            end else if (s1_x[2:0] == 3'd0) begin
+                // new cell
+                s2_prng_state <= s2_prng_succ;
+            end
+        end
+
+    // XXX the above is broken & incomplete
 
     // // // //
-    // Stage 2: Decode what we got from the tile map, to decide what tile
-    // should appear in this 8x8 cell.
-
-    // bringing signals forward from stage 1
+    // Stage 2: bring signals forward from stage 1
     reg [10:0]s2_x = 11'd0;
     reg [9:0]s2_y = 10'd0;
     always @(posedge clk) s2_x <= rst ? 11'd0 : s1_x;
     always @(posedge clk) s2_y <= rst ? 10'd0 : s1_y;
+
+    // // // //
+    // Stage 2: Decode what we got from the tile map, to decide what tile
+    // should appear in this 8x8 cell.
 
     // if this is in the leftmost 120 grid columns (960 pixels): play area
     wire [1:0]s2_pa_what = s2_y[3] ? s2_tm_red_v[3:2] : s2_tm_red_v[1:0];
@@ -258,86 +284,6 @@ module fpga_robots_game_video(
         end
 endmodule
 
-// pseudorandom_20_3() - Given 20 bits of input, generate 3 bits of output
-// pseudorandomly derived from it.  Used to generate some jittery
-// animation in this game.  For best results, give it several clock
-// cycles (and a consistent number of them) between 'stb' pulses.
-module pseudorandom_20_3(
-    input clk, // system clock (rising edge active)
-    input rst, // system reset signal (active high synchronous)
-    input [19:0]inp, // input value
-    output reg [2:0]out = 3'd0, // output value
-    input stb // Strobe: Causes the value of 'inp' to be read this cycle, and
-              // 'out' to be changed *next* cycle, based on the *last* input.
-);
-    // Pair of 16-entry 12-bit "S-box" look up tables, at the heart of this
-    // pseudorandom function.  Based on the hexadecimal expansion of 1/e.
-    // One out of every four hex digits was omitted due to an error on my
-    // part.  Oh well.
-
-    wire [3:0]sb1in;
-    reg [11:0]sb1out;
-    always @*
-        case(sb1in)
-            4'b0000: sb1out = 12'hE2D;
-            4'b0001: sb1out = 12'h8D8;
-            4'b0010: sb1out = 12'h3BC;
-            4'b0011: sb1out = 12'hF1A;
-            4'b0100: sb1out = 12'hADE;
-            4'b0101: sb1out = 12'h782;
-            4'b0110: sb1out = 12'h054;
-            4'b0111: sb1out = 12'h90D;
-            4'b1000: sb1out = 12'hA98;
-            4'b1001: sb1out = 12'h5AA;
-            4'b1010: sb1out = 12'h56C;
-            4'b1011: sb1out = 12'h733;
-            4'b1100: sb1out = 12'h024;
-            4'b1101: sb1out = 12'h9D0;
-            4'b1110: sb1out = 12'h507;
-            4'b1111: sb1out = 12'hAED;
-        endcase
-    wire [3:0]sb2in;
-    reg [11:0]sb2out;
-    always @*
-        case(sb2in)
-            4'b0000: sb2out = 12'h164;
-            4'b0001: sb2out = 12'h0BF;
-            4'b0010: sb2out = 12'h72B;
-            4'b0011: sb2out = 12'h215;
-            4'b0100: sb2out = 12'h824;
-            4'b0101: sb2out = 12'hB66;
-            4'b0110: sb2out = 12'hD90;
-            4'b0111: sb2out = 12'h27A;
-            4'b1000: sb2out = 12'hAEA;
-            4'b1001: sb2out = 12'h550;
-            4'b1010: sb2out = 12'h68D;
-            4'b1011: sb2out = 12'h392;
-            4'b1100: sb2out = 12'h9F0;
-            4'b1101: sb2out = 12'hC62;
-            4'b1110: sb2out = 12'h6DC;
-            4'b1111: sb2out = 12'hA58;
-        endcase
-
-    // Turn those into a single clock cycle 20-to-20 bit function.
-    wire [19:0]rfin;
-    assign sb1in = rfin[19:16];
-    assign sb2in = rfin[15:12];
-    wire [19:0]rfout = { rfin[11:0] ^ sb1out ^ sb2out, rfin[19:12] };
-
-    // And run that 20-to-20 bit function repeatedly to produce
-    // the result.
-    reg [19:0] state = 20'd0;
-    assign rfin = stb ? inp : state;
-    always @(posedge clk)
-        if (rst) begin
-            state <= 20'd0;
-            out <= 3'd0;
-        end else begin
-            state <= rfout;
-            if (stb) out <= state[19:17];
-        end
-endmodule
-
 `ifdef ANALYZE_VIDEO_TIMINGS
     // ANALYZE_VIDEO_TIMINGS is meant for running this code standalone
     // in Icarus Verilog just to see what the timings of sync pulses, etc,
@@ -383,66 +329,3 @@ module top();
         $display("[%02x]%s", video, framestart ? "*" : "");
 endmodule
 `endif // ANALYZE_VIDEO_TIMINGS
-
-`ifdef ANALYZE_PRNG
-// This code is to be run in Icarus Verilog to analyze the output of
-// pseudorandom_20_3().
-module top( );
-    // Simulated clock.
-    reg clk = 1'd0;
-    initial forever begin #10; clk = ~clk; end
-    reg rst = 1'd1;
-    initial begin
-        #100;
-        @(posedge clk);
-        rst <= 1'd0;
-    end
-
-    // Run four times with each of a million inputs, in four different orders
-    reg prstb = 1'd0;
-    reg [24:0]cycle = 25'd0;
-    reg [19:0]prin = 20'd0;
-    reg [19:0]prin_old = 20'dx;
-    reg [19:0]prin_older = 20'dx;
-    wire [2:0] prout;
-    always @(posedge clk)
-        if (rst) begin
-            prstb <= 1'd0;
-            cycle <= 25'd0;
-            prin <= 1'd0;
-            prin_old <= 20'dx;
-            prin_older <= 20'dx;
-        end else begin
-            prstb <= 1'd0;
-            case (cycle[2:0])
-                3'd0: begin
-                    prstb <= 1'd1;
-                end
-                3'd1: begin
-                    prin_older <= prin_old;
-                    prin_old <= prin;
-                    // $display("in 0x%05x", prin);
-                end
-                3'd2: $display("0x%05x => %d", prin_older, prout);
-            endcase
-            case (cycle[24:23])
-                2'd0: prin <= cycle[22:3] ^ // operating cycle
-                              { 6 { cycle[2:0] } }; // mess with input when
-                                                    // it should be ignored
-                2'd1: prin <= (20'd1048575 - cycle[22:3]) ^
-                              { 6 { cycle[2:0] } };
-                2'd2: prin <= (cycle[22:3] + 20'd123456) ^
-                              { 6 { cycle[2:0] } };
-                2'd3: prin <= { cycle[12:3] + 10'd123,
-                                10'd456 - cycle[22:13] } ^
-                              { 6 { cycle[2:0] } };
-            endcase
-            cycle <= cycle + 25'd1;
-        end
-
-    pseudorandom_20_3 prng(
-        .clk(clk), .rst(rst), .inp(prin), .out(prout), .stb(prstb)
-    );
-endmodule
-
-`endif // ANALYZE_PRNG

@@ -1,7 +1,7 @@
 # Makefile: used with 'make' to build stuff
 # As yet it does not build the whole thing, just some parts.
 
-VERILOG=fpga_robots_game.v fpga_robots_game_clock.v fpga_robots_game_video.v
+VERILOG=fpga_robots_game.v fpga_robots_game_clock.v fpga_robots_game_video.v misc.v
 
 build: a.out tile_images.mem key_table.mem
 
