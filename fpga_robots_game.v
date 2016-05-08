@@ -65,8 +65,12 @@ module fpga_robots_game(
             blink_state <= 16'd17;
         else if (blink_inc[22])
             blink_state <= { blink_state[14:0], blink_state[15] };
-//    always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
-always @* board_led = anitog;
+
+`ifdef NOT_DEFINED  // XXX debugging stuff, put back one day
+    always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
+`else
+    always @* board_led = anitog;
+`endif
 
     // Video output generator.  It owns the "tile map" memory which is also
     // used by the game play logic.
