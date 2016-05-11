@@ -28,6 +28,8 @@
 // The tile image memory contains 128 tiles, each 8x8 pixels, each pixel
 // 4 bits (RGBI encoding, R is the low bit, I the high bit).
 
+`include "fpga_robots_game_config.v"
+
 module fpga_robots_game_video(
     // system interface
     input clk, // clock signal: about 65MHz; everything happens on rising edge
@@ -43,9 +45,11 @@ module fpga_robots_game_video(
     input     [12:0] tm_adr,        // address
     output reg [7:0] tm_red = 8'd0, // data read from last address
     input      [7:0] tm_wrt,        // data to be written
-    input            tm_wen,        // enable write
+    input            tm_wen         // enable write
+`ifdef FPGA_ROBOTS_ANIMATE
     // anitog: toggle this value when it's time for a new animation frame
-    input anitog
+    , input anitog
+`endif
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -121,6 +125,7 @@ module fpga_robots_game_video(
             s2_tm_red_v <= tile_map[s1_tm_adr_v];
         end
 
+`ifdef FPGA_ROBOTS_ANIMATE
     // // // //
     // Stages 1-2: Animation control.  For each game play tile there are
     // eight variants, and we'll choose between them based on a pseudo
@@ -128,6 +133,8 @@ module fpga_robots_game_video(
     // by the fact that we want to use the same value for all the pixels
     // in an 8x8 grid cell, and to continue to do so for several video
     // frames.
+
+    // XXX this state machine has been rewritten, since it didn't work; and the new has not yet been tested
 
     // PRNG state, it's always used to control the animation
     reg [19:0]s2_prng_state = 20'd1;
@@ -138,10 +145,10 @@ module fpga_robots_game_video(
     lfsr_20_3 aniprng(.in(s2_prng_state), .out(s2_prng_succ));
 
     // Figuring out where we are on the screen (at stage 1), it matters
-    reg s1_west = 1'd0;
-    always @(posedge clk) s1_west <= s1_x_wrap;
-    reg s1_northwest = 1'd0;
-    always @(posedge clk) s1_northwest <= s1_x_wrap && s1_y_wrap;
+    wire s1_col7 = &(s1_x[2:0]); // x = 7, 15, 23, etc
+    wire s1_row7 = &(s1_y[2:0]); // y = 7, 15, 23, etc
+    wire s1_colb = s1_x[10]; // x >= 1024
+    wire s1_rowb = &(s1_y[9:8]); // y >= 768
 
     // A state machine manages changes of s2_prng_state at various points
     // in time, and copying to/from a few saved copies of s2_prng_state.
@@ -155,26 +162,33 @@ module fpga_robots_game_video(
             s2_prng_line <= 20'd1;
             s2_anitog_fol <= 1'd0;
         end else begin
-            if (s1_northwest) begin
-                // new video frame
-                s2_prng_state <= s2_prng_frame;
-                if (s2_anitog_fol != anitog) begin
-                    // and new animation frame
-                    s2_prng_frame <= s2_prng_succ;
-                    s2_prng_line <= s2_prng_frame;
-                    s2_anitog_fol <= anitog;
-                end
-            end else if (s1_west) begin
-                // new scan line
-                s2_prng_state <= s2_prng_line;
-                // XXX new line
-            end else if (s1_x[2:0] == 3'd0) begin
-                // new cell
+            // In visible area: change every 8 pixels (1 cell)
+            if (s1_col7)
                 s2_prng_state <= s2_prng_succ;
+            // Outside visible area: hold across scan lines & frames as
+            // desired.
+            if (s1_colb) begin
+                // in horizontal blanking interval: prepare for next scan line
+                if (s1_rowb) begin
+                    // in vertical blanking interval
+                    if (s2_anitog_fol != anitog) begin
+                        // new animation frame
+                        s2_anitog_fol <= anitog;
+                        s2_prng_frame <= s2_prng_succ;
+                    end else
+                        // repeat animation frame
+                        s2_prng_state <= s2_prng_frame;
+                end else if (!s1_row7)
+                    // scan line 0-6, 8-14: repeat the scan line
+                    s2_prng_state <= s2_prng_line;
+                else
+                    // scan line 7, 15: don't repeat the scan line
+                    s2_prng_line <= s2_prng_succ;
             end
         end
-
-    // XXX the above is broken & incomplete
+`else // !FPGA_ROBOTS_ANIMATE
+    wire [2:0]s2_animode = 3'd0;
+`endif // !FPGA_ROBOTS_ANIMATE
 
     // // // //
     // Stage 2: bring signals forward from stage 1

@@ -1,6 +1,8 @@
 // misc.v
 // Jeremy Dilatush - started April 2016
 
+`include "fpga_robots_game_config.v"
+
 // pseudorandom_20_3() - Given 20 bits of input, generate 3 bits of output
 // pseudorandomly derived from it.  Used to generate some jittery
 // animation in this game.  For best results, give it several clock
@@ -185,3 +187,46 @@ module top( );
 
 endmodule
 `endif
+
+// sinewaver() - Generate a 16 bit sinusoidal wave.  The period is
+// 1609 pulses of 'trigger'
+// XXX test this
+module sinewaver(
+    input clk, // system clock and reset
+    input rst,
+    input trigger, // trigger pulses to advance the state
+    output [15:0]out // the wave form value
+);
+    // The driving formula of this is:
+    //  (x,y) <= (x+y*c,y-x*c)
+    // where in this case c is 1/256.
+    // Roundoff errors make this not quite a perfect sine curve, but
+    // good enough, as long as we reset it every cycle.
+    reg [15:0]x = 16'h7800;
+    reg [15:0]y = 16'h0000;
+
+    // Use 'y' as the output
+    assign out = y;
+
+    // signed division by 256
+    wire [15:0]xc = { { 8 { x[8] } }, x[7:0] };
+    wire [15:0]yc = { { 8 { y[8] } }, y[7:0] };
+
+    // successor function
+    wire [15:0]x2 = x + yc;
+    wire [15:0]y2 = y - xc;
+
+    // detect origin crossing
+    wire cross = y2[15] && !y[15];
+
+    // updates
+    always @(posedge clk)
+        if (rst)
+            { x, y } <= { 16'h7800, 16'h0 };
+        else if (trigger) begin
+            if (cross)
+                { x, y } <= { 16'h7800, 16'h0 };
+            else
+                { x, y } <= { x2, y2 };
+        end
+endmodule
