@@ -190,43 +190,97 @@ endmodule
 
 // sinewaver() - Generate a 16 bit sinusoidal wave.  The period is
 // 1609 pulses of 'trigger'
-// XXX test this
 module sinewaver(
     input clk, // system clock and reset
     input rst,
     input trigger, // trigger pulses to advance the state
     output [15:0]out // the wave form value
 );
+    parameter INIT_X = 16'h7800; // almost full deflection, just a little
+                                 // bit reduced to make room for error
+    parameter INIT_Y = 16'h0000;
+
     // The driving formula of this is:
-    //  (x,y) <= (x+y*c,y-x*c)
+    //  (x,y) <= (x-y*c,y+x*c)
     // where in this case c is 1/256.
     // Roundoff errors make this not quite a perfect sine curve, but
     // good enough, as long as we reset it every cycle.
-    reg [15:0]x = 16'h7800;
-    reg [15:0]y = 16'h0000;
+    reg [15:0]x = INIT_X;
+    reg [15:0]y = INIT_Y;
 
-    // Use 'y' as the output
-    assign out = y;
+    // Use 'y' as the output; but bias it to an unsigned value
+    assign out = { ~(y[15]), y[14:0] };
 
     // signed division by 256
-    wire [15:0]xc = { { 8 { x[8] } }, x[7:0] };
-    wire [15:0]yc = { { 8 { y[8] } }, y[7:0] };
+    wire [15:0]xc = { { 8 { x[15] } }, x[15:8] };
+    wire [15:0]yc = { { 8 { y[15] } }, y[15:8] };
 
     // successor function
-    wire [15:0]x2 = x + yc;
-    wire [15:0]y2 = y - xc;
+    wire [15:0]x2 = x - yc;
+    wire [15:0]y2 = y + xc;
 
     // detect origin crossing
-    wire cross = y2[15] && !y[15];
+    wire cross = y[15] && !y2[15]; // XXX broken
 
     // updates
     always @(posedge clk)
         if (rst)
-            { x, y } <= { 16'h7800, 16'h0 };
+            { x, y } <= { INIT_X, INIT_Y };
         else if (trigger) begin
             if (cross)
-                { x, y } <= { 16'h7800, 16'h0 };
+                { x, y } <= { INIT_X, INIT_Y };
             else
                 { x, y } <= { x2, y2 };
         end
 endmodule
+
+`ifdef TEST_SINEWAVER
+// This code is to be run in Icarus Verilog to test sinewaver().
+module top( );
+    reg [15:0] count;
+    wire [15:0] out;
+    reg clk, rst, trigger;
+    sinewaver sw(.clk(clk), .rst(rst), .trigger(trigger), .out(out));
+
+    initial begin
+        clk = 1'd0;
+        rst = 1'd1;
+        trigger = 1'd0;
+
+        #10; clk = 1'd1; #10; clk = 1'd0;
+        #10; clk = 1'd1; #10; clk = 1'd0;
+        #10; clk = 1'd1; #10; clk = 1'd0;
+        #10; rst = 1'd0; clk = 1'd1; #10; clk = 1'd0;
+
+        for (count = 0; count < 16090; count = count + 1) begin
+            #10;
+            trigger = 1'd1;
+            clk = 1'd1;
+            #10;
+            clk = 1'd0;
+            trigger = 1'd0;
+            #10;
+            if (out[15]) begin
+                // mess with time
+                clk = 1'd1;
+                #10;
+                clk = 1'd0;
+                #10;
+            end
+            if (out[14]) begin
+                // mess with time
+                clk = 1'd1;
+                #10;
+                clk = 1'd0;
+                #10;
+            end
+            $display("%d", out);
+            $display("# x=%d y=%d x2=%d y2=%d cross=%b",
+                     sw.x, sw.y, sw.x2, sw.y2,
+                     sw.cross);
+        end
+        $finish;
+    end
+endmodule
+`endif
+

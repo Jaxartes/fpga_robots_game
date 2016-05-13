@@ -106,8 +106,35 @@ module fpga_robots_game(
     assign o_video_g[1:0] = o_video_g[3:2];
     assign o_video_b[1:0] = o_video_b[3:2];
 
+    // Audio output.  We can do a nice sine wave or an ugly but simple
+    // (and familiar) square wave.
+`ifdef FPGA_ROBOTS_SQUARE
+    // Square wave at about 450Hz, by dividing baud1 down by 256
+    wire audio;
+    reg [7:0]audiv = 8'd0;
+    always @(posedge clk)
+        if (rst)
+            audiv <= 8'd0;
+        else if (baud1)
+            audiv <= audiv + 8'd1;
+    assign audio = audiv[7];
+`else // !FPGA_ROBOTS_SQUARE
+    // Sine wave at about 573Hz, by triggering sinewaver() from baud8.
+    // baud8's 921,600 pulses per second divided by sinewaver()'s
+    // 1609 pulses per cycle makes about 573Hz.
+    // The output is fed into a simple sigma-delta converter.
+    wire [15:0]audwave;
+    reg audio = 1'd0;
+    reg [15:0]audacc = 16'd0;
+    sinewaver audsine(.clk(clk), .rst(rst), .trigger(baud8), .out(audwave));
+    always @(posedge clk)
+        { audio, audacc } <= audacc + audwave;
+`endif // !FPGA_ROBOTS_SQUARE
+
+    // Either way, this game doesn't do stereo.
+    assign o_audio_l = audio;
+    assign o_audio_r = audio;
+
     // Dummy signals: eventually hook these up or something XXX
     assign serial_tx = 1'd1;
-    assign o_audio_l = 1'd0;
-    assign o_audio_r = 1'd0;
 endmodule
