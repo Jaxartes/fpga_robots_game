@@ -60,6 +60,9 @@ module fpga_robots_game(
     end
     wire rst = rst2 || ~clklck;
 
+    // A signal to get the user's attention
+    wire attention;
+
     // Blink the board_led twice, for 1/16 second, every second, 3/16
     // second apart.  This allows us to determine that it's up and running
     // and clocking properly.
@@ -99,6 +102,7 @@ module fpga_robots_game(
         // control animation
         , .anitog(anitog)
 `endif
+        , .attention(attention)
     );
 
     // convert 6 bit to 12 bit color
@@ -115,7 +119,7 @@ module fpga_robots_game(
     always @(posedge clk)
         if (rst)
             audiv <= 8'd0;
-        else if (baud1)
+        else if (baud1 && attention)
             audiv <= audiv + 8'd1;
     assign audio = audiv[7];
 `else // !FPGA_ROBOTS_SQUARE
@@ -126,7 +130,8 @@ module fpga_robots_game(
     wire [15:0]audwave;
     reg audio = 1'd0;
     reg [15:0]audacc = 16'd0;
-    sinewaver audsine(.clk(clk), .rst(rst), .trigger(baud8), .out(audwave));
+    sinewaver audsine(.clk(clk), .rst(rst),
+                      .trigger(attention && baud8), .out(audwave));
     always @(posedge clk)
         { audio, audacc } <= audacc + audwave;
 `endif // !FPGA_ROBOTS_SQUARE
@@ -137,4 +142,5 @@ module fpga_robots_game(
 
     // Dummy signals: eventually hook these up or something XXX
     assign serial_tx = 1'd1;
+    assign attention = board_led;
 endmodule

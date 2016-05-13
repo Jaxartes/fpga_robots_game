@@ -50,6 +50,8 @@ module fpga_robots_game_video(
     // anitog: toggle this value when it's time for a new animation frame
     , input anitog
 `endif
+    // attention: mess with the display so the user will notice
+    , input attention
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -276,10 +278,15 @@ module fpga_robots_game_video(
     wire [3:0] s3_rgbi = s3_x[0] ? s3_tile_images_red[3:0] :
                                    s3_tile_images_red[7:4];
 
-    // convert that to real color outputs, 2 bits per component
-    wire [1:0] s3_v_red = s3_visible ? { s3_rgbi[0], s3_rgbi[3] } : 2'd0;
-    wire [1:0] s3_v_grn = s3_visible ? { s3_rgbi[1], s3_rgbi[3] } : 2'd0;
-    wire [1:0] s3_v_blu = s3_visible ? { s3_rgbi[2], s3_rgbi[3] } : 2'd0;
+    // convert that to real color outputs, 2 bits per component, optionally
+    // inverted if we want the user's attention
+    wire atn = attention && (s3_x[9:6] == 4'd15);
+    wire [1:0] s3_v_red = s3_visible ? { s3_rgbi[0] ^ atn,
+                                         s3_rgbi[3] ^ atn } : 2'd0;
+    wire [1:0] s3_v_grn = s3_visible ? { s3_rgbi[1] ^ atn,
+                                         s3_rgbi[3] ^ atn } : 2'd0;
+    wire [1:0] s3_v_blu = s3_visible ? { s3_rgbi[2] ^ atn,
+                                         s3_rgbi[3] ^ atn } : 2'd0;
 
     // // // //
     // After all the pipeline stages: register the outputs
