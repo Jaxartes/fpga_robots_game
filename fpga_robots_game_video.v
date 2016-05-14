@@ -89,6 +89,16 @@ module fpga_robots_game_video(
         s1_x[9:3]  // each 8 horiz pixels make a 1 byte step, 0-127
     };
 
+    // And we want to know when we're at the top/left edges of the screen.
+    reg s1_x_zero = 1'd1;
+    always @(posedge clk) s1_x_zero <= rst ? 1'd1 : s1_x_wrap;
+    reg s1_y_zero = 1'd1;
+    always @(posedge clk)
+        if (rst)
+            s1_y_zero <= 1'd1;
+        else if (s1_x_wrap)
+            s1_y_zero <= s1_y_wrap;
+
     // // // //
     // Stages 1-2: Tile map memory.  Inputs to it are stage 1, outputs
     // come a cycle later, so stage 2.  The memory is dual-ported, so I
@@ -136,8 +146,6 @@ module fpga_robots_game_video(
     // in an 8x8 grid cell, and to continue to do so for several video
     // frames.
 
-    // XXX this state machine has been rewritten, since it didn't work; and the new has not yet been tested
-
     // PRNG state, it's always used to control the animation
     reg [19:0]s2_prng_state = 20'd1;
     wire [2:0]s2_animode = s2_prng_state[2:0];
@@ -147,10 +155,8 @@ module fpga_robots_game_video(
     lfsr_20_3 aniprng(.in(s2_prng_state), .out(s2_prng_succ));
 
     // Figuring out where we are on the screen (at stage 1), it matters
-    wire s1_col7 = &(s1_x[2:0]); // x = 7, 15, 23, etc
-    wire s1_row7 = &(s1_y[2:0]); // y = 7, 15, 23, etc
-    wire s1_colb = s1_x[10]; // x >= 1024
-    wire s1_rowb = &(s1_y[9:8]); // y >= 768
+    wire s1_col0 = ~|(s1_x[2:0]); // x = 0, 8, 16, etc
+    wire s1_row0 = ~|(s1_y[2:0]); // y = 0, 8, 16, etc
 
     // A state machine manages changes of s2_prng_state at various points
     // in time, and copying to/from a few saved copies of s2_prng_state.
@@ -164,28 +170,33 @@ module fpga_robots_game_video(
             s2_prng_line <= 20'd1;
             s2_anitog_fol <= 1'd0;
         end else begin
-            // In visible area: change every 8 pixels (1 cell)
-            if (s1_col7)
-                s2_prng_state <= s2_prng_succ;
-            // Outside visible area: hold across scan lines & frames as
-            // desired.
-            if (s1_colb) begin
-                // in horizontal blanking interval: prepare for next scan line
-                if (s1_rowb) begin
-                    // in vertical blanking interval
+            if (s1_x_zero) begin
+                if (s1_y_zero) begin
+                    // upper-left corner of screen: start a new frame or
+                    // repeat the last one
                     if (s2_anitog_fol != anitog) begin
-                        // new animation frame
+                        // new frame
                         s2_anitog_fol <= anitog;
-                        s2_prng_frame <= s2_prng_succ;
-                    end else
-                        // repeat animation frame
+                        s2_prng_frame <= s2_prng_state;
+                        s2_prng_line <= s2_prng_state;
+                    end else begin
+                        // old frame
                         s2_prng_state <= s2_prng_frame;
-                end else if (!s1_row7)
-                    // scan line 0-6, 8-14: repeat the scan line
-                    s2_prng_state <= s2_prng_line;
-                else
-                    // scan line 7, 15: don't repeat the scan line
-                    s2_prng_line <= s2_prng_succ;
+                        s2_prng_line <= s2_prng_frame;
+                    end
+                end else begin
+                    // left edge of screen: start new row or repeat old one
+                    if (s1_row0) begin
+                        // new row
+                        s2_prng_line <= s2_prng_state;
+                    end else begin
+                        // old row
+                        s2_prng_state <= s2_prng_line;
+                    end
+                end
+            end else if (s1_col0) begin
+                // new cell
+                s2_prng_state <= s2_prng_succ;
             end
         end
 `else // !FPGA_ROBOTS_ANIMATE
@@ -226,7 +237,7 @@ module fpga_robots_game_video(
     wire [11:0]s2_tile_img_adr = {
         s2_tile,   // 7 bit tile number
         s2_y[2:0], // 3 bit row number within tile
-        s2_x[2:1]  // upper 2 bits of 2 bit column number within tile
+        s2_x[2:1]  // upper 2 bits of 3 bit column number within tile
     };
 
     // // // //
@@ -239,7 +250,7 @@ module fpga_robots_game_video(
     // portable.
 
     reg [7:0] tile_images [0:4095];
-    reg [7:0] s3_tile_images_red = 8'd0;
+    reg [7:0] s3_tile_images_read = 8'd0;
 
 `ifndef ANALYZE_VIDEO_TIMINGS
     initial $readmemh("tile_images.mem", tile_images, 0, 4095);
@@ -254,7 +265,7 @@ module fpga_robots_game_video(
 `endif // ANALYZE_VIDEO_TIMINGS
 
     always @(posedge clk)
-        s3_tile_images_red <= rst ? 8'd0 : tile_images[s2_tile_img_adr];
+        s3_tile_images_read <= rst ? 8'd0 : tile_images[s2_tile_img_adr];
 
     // // // //
     // Stage 3: Generate the video output
@@ -275,8 +286,8 @@ module fpga_robots_game_video(
         s3_in_vblank && (s3_y[5:0] >= 6'd3) && (s3_y[5:0] <= 6'd8);
 
     // select one of the two pixels from the tile image we got
-    wire [3:0] s3_rgbi = s3_x[0] ? s3_tile_images_red[3:0] :
-                                   s3_tile_images_red[7:4];
+    wire [3:0] s3_rgbi = s3_x[0] ? s3_tile_images_read[3:0] :
+                                   s3_tile_images_read[7:4];
 
     // convert that to real color outputs, 2 bits per component, optionally
     // inverted if we want the user's attention
