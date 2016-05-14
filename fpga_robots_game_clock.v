@@ -106,7 +106,7 @@ module fpga_robots_game_clock(
 `ifdef FPGA_ROBOTS_ANIMATE
     // Animated video; the clock for it is run off the 115,200 baud serial  
     // clock.
-    parameter ANIMATION_RATE = 20'd5; // 5 here means 1.1Hz
+    parameter ANIMATION_RATE = 20'd18; // 5 here means 1.1Hz
     reg [19:0] anictr = 20'd0;
     always @(posedge oclk)
         if (baud1)
