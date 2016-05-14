@@ -12,7 +12,7 @@
 module fpga_robots_game(
     // all these are signals going out of the FPGA chip itself
     input board_clk, // original clock signal
-    output reg board_led, // light emitting diode used for signalling
+    output board_led, // light emitting diode used for signalling
     input i_reset, // reset pushbutton switch
     output [3:0]o_video_r, // video output
     output [3:0]o_video_g,
@@ -31,12 +31,13 @@ module fpga_robots_game(
     // determined by the XGA video output timings, with a 65MHz pixel clock.
 
     wire clk, clklck;
+    wire baud1, baud8, sixus;
 `ifdef FPGA_ROBOTS_ANIMATE
     wire anitog;
 `endif
     fpga_robots_game_clock clock(
-        .iclk(board_clk), .oclk(clk), .locked(clklck)
-        // XXX hook up baud1, baud8, sixus
+        .iclk(board_clk), .oclk(clk), .locked(clklck),
+        .baud1(baud1), .baud8(baud8), .sixus(sixus)
 `ifdef FPGA_ROBOTS_ANIMATE
         ,.anitog(anitog)
 `endif
@@ -76,7 +77,10 @@ module fpga_robots_game(
         else if (blink_inc[22])
             blink_state <= { blink_state[14:0], blink_state[15] };
 
-    always @(posedge clk) board_led <= rst ? 1'd0 : blink_state[0];
+    reg blink_out = 1'd0;
+    always @(posedge clk) blink_out <= rst ? 1'd0 : blink_state[0];
+
+    assign board_led = blink_out;
 
     // Video output generator.  It owns the "tile map" memory which is also
     // used by the game play logic.
@@ -142,5 +146,5 @@ module fpga_robots_game(
 
     // Dummy signals: eventually hook these up or something XXX
     assign serial_tx = 1'd1;
-    assign attention = board_led;
+    assign attention = blink_out;
 endmodule

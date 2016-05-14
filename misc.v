@@ -194,7 +194,9 @@ module sinewaver(
     input clk, // system clock and reset
     input rst,
     input trigger, // trigger pulses to advance the state
-    output [15:0]out // the wave form value
+    output [15:0]out, // the wave form value
+    output cross // is at reset point; can use 'cross && trigger' to detect
+                 // full cycles
 );
     parameter INIT_X = 16'h7800; // almost full deflection, just a little
                                  // bit reduced to make room for error
@@ -220,7 +222,7 @@ module sinewaver(
     wire [15:0]y2 = y + xc;
 
     // detect origin crossing
-    wire cross = y[15] && !y2[15]; // XXX broken
+    assign cross = y[15] && !y2[15];
 
     // updates
     always @(posedge clk)
