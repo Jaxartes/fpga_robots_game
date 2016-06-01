@@ -25,7 +25,6 @@ module serial_port(
     input tx_stb, // pulse when tx_dat is valid & has new data
     output tx_rdy // will be high when all data has been transmitted
 );
-// XXX under me: converting
 
     // External interface to 1 byte TX FIFO.  (The RX FIFO's interface
     // is simpler and fits into the RX logic below.)

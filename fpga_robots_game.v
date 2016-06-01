@@ -144,7 +144,50 @@ module fpga_robots_game(
     assign o_audio_l = audio;
     assign o_audio_r = audio;
 
-    // Dummy signals: eventually hook these up or something XXX
-    assign serial_tx = 1'd1;
-    assign attention = blink_out;
+    // Serial port
+    wire [7:0]ser_rx_dat;
+    wire [7:0]ser_tx_dat;
+    wire ser_rx_stb;
+    wire ser_tx_stb;
+    wire ser_tx_rdy;
+    serial_port ser(
+        // general system stuff
+        .clk(clk), .rst(rst),
+        // the external serial port
+        .rx_raw(serial_rx), .tx(serial_tx),
+        // timing control signal, determines the baud rate
+        .baud1(baud1), .baud8(baud8),
+        // serial port RX and TX bytes
+        .rx_dat(ser_rx_dat), .rx_stb(ser_rx_stb),
+        .tx_dat(ser_tx_dat), .tx_stb(ser_tx_stb), .tx_rdy(ser_tx_rdy)
+    );
+
+    // Control interface: Receives signals from serial port & from PS/2
+    // keyboard.
+    wire [15:0]ctl_cmd;
+    fpga_robots_game_control ctl(
+        // general system stuff
+        .clk(clk), .rst(rst),
+        // PS/2 port: for now just a dummy, to be done later XXX
+        .ps2_rx_dat(8'd0), .ps2_rx_stb(1'd0),
+        // Serial port: another way to get commands
+        .ser_rx_dat(ser_rx_dat),
+        .ser_rx_stb(ser_rx_stb),
+        .ser_tx_dat(ser_tx_dat),
+        .ser_tx_stb(ser_tx_stb),
+        .ser_tx_rdy(ser_tx_rdy),
+        // Command bits output, for now mostly unused XXX
+        .cmd(ctl_cmd)
+    );
+
+    // Just for testing: attention, F1 to turn it on, F2 to turn it off
+    reg attention_r = 1'd0;
+    assign attention = attention_r;
+    always @(posedge clk)
+        if (rst)
+            attention_r <= 1'd0;
+        else if (ctl_cmd[9])
+            attention_r <= 1'd0;
+        else if (ctl_cmd[8])
+            attention_r <= 1'd1;
 endmodule
