@@ -33,6 +33,22 @@ module fpga_robots_game_control(
     // game logic to keep track of pending commands.
     output reg [15:0]cmd = 16'd0
 );
+`ifdef FPGA_ROBOTS_BIG_KEY_TABLE
+    // Lookup table for controlling the keyboard: 512 x 16 bits; expanded
+    // to 1024 x 16 bits to work around a supposed bug.
+    reg [15:0]key_table[0:1023];
+    reg [15:0]key_table_dat = 16'd0;
+    wire [8:0]key_table_adr;
+    initial $readmemh("key_table.mem", key_table, 0, 511);
+    initial $readmemh("key_table.mem", key_table, 512, 1023);
+    reg garbage_bit = 1'd0;
+    always @(posedge clk)
+        if (rst)
+            key_table_dat <= 16'd0;
+        else
+            key_table_dat <= key_table[{ garbage_bit, key_table_adr }];
+    always @(posedge clk) garbage_bit <= !garbage_bit;
+`else // !FPGA_ROBOTS_BIG_KEY_TABLE
     // Lookup table for controlling the keyboard: 512 x 16 bits
     reg [15:0]key_table[0:511];
     reg [15:0]key_table_dat = 16'd0;
@@ -43,6 +59,7 @@ module fpga_robots_game_control(
             key_table_dat <= 16'd0;
         else
             key_table_dat <= key_table[key_table_adr];
+`endif // !FPGA_ROBOTS_BIG_KEY_TABLE
 
     // State machine for converting serial port RX bytes into key code
     // equivalents:
