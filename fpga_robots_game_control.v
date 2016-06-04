@@ -32,6 +32,9 @@ module fpga_robots_game_control(
     // be pulsed when the command is issued, it's up to the rest of the
     // game logic to keep track of pending commands.
     output reg [15:0]cmd = 16'd0
+
+    // debugging, just in case we want it
+    , output dbg
 );
 `ifdef FPGA_ROBOTS_BIG_KEY_TABLE
     // Lookup table for controlling the keyboard: 512 x 16 bits; expanded
@@ -39,8 +42,10 @@ module fpga_robots_game_control(
     reg [15:0]key_table[0:1023];
     reg [15:0]key_table_dat = 16'd0;
     wire [8:0]key_table_adr;
-    initial $readmemh("key_table.mem", key_table, 0, 511);
-    initial $readmemh("key_table.mem", key_table, 512, 1023);
+    initial begin
+        $readmemh("key_table.mem", key_table, 0, 511);
+        $readmemh("key_table.mem", key_table, 512, 1023);
+    end
     reg garbage_bit = 1'd0;
     always @(posedge clk)
         if (rst)
@@ -136,4 +141,7 @@ module fpga_robots_game_control(
                    ((kdec_stb && (!kdec_brk_d1)) ? // when new ones are pressed
                     key_table_dat : 16'h0000); // they assert the command bits
         end
+
+    // 'dbg' unconnected for now
+    assign dbg = 1'd0;
 endmodule

@@ -165,6 +165,7 @@ module fpga_robots_game(
     // Control interface: Receives signals from serial port & from PS/2
     // keyboard.
     wire [15:0]ctl_cmd;
+    wire ctl_dbg;
     fpga_robots_game_control ctl(
         // general system stuff
         .clk(clk), .rst(rst),
@@ -178,6 +179,8 @@ module fpga_robots_game(
         .ser_tx_rdy(ser_tx_rdy),
         // Command bits output, for now mostly unused XXX
         .cmd(ctl_cmd)
+        // debugging
+        ,.dbg(ctl_dbg)
     );
 
     // Just for testing: attention, F1 to turn it on, F2 to turn it off
