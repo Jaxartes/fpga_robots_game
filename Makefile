@@ -8,6 +8,7 @@ VERILOG= \
     misc.v \
     fpga_robots_game_config.v \
     serial_port.v \
+    fpga_robots_game_play.v \
     fpga_robots_game_control.v
 
 build: a.out tile_images.mem key_table.mem

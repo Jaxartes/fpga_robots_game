@@ -84,6 +84,10 @@ module fpga_robots_game(
 
     // Video output generator.  It owns the "tile map" memory which is also
     // used by the game play logic.
+    wire [12:0]tm_adr; // access to tile map memory: address
+    wire [7:0] tm_wrt; // access to tile map memory: write data
+    wire [7:0] tm_red; // access to tile map memory: read data
+    wire       tm_wen; // access to tile map memory: write enable
     fpga_robots_game_video video(
         // system interface
         .clk(clk), .rst(rst),
@@ -96,11 +100,10 @@ module fpga_robots_game(
         .v_vsy(o_vsync),
 
         // tile map memory access
-            // XXX this is dummy & not really filled in
-        .tm_adr(13'd0),
-        // .tm_red(XXX),
-        .tm_wrt(8'd0),
-        .tm_wen(1'd0)
+        .tm_adr(tm_adr),
+        .tm_red(tm_red),
+        .tm_wrt(tm_wrt),
+        .tm_wen(tm_wen)
 
 `ifdef FPGA_ROBOTS_ANIMATE
         // control animation
@@ -177,10 +180,24 @@ module fpga_robots_game(
         .ser_tx_dat(ser_tx_dat),
         .ser_tx_stb(ser_tx_stb),
         .ser_tx_rdy(ser_tx_rdy),
-        // Command bits output, for now mostly unused XXX
+        // Command bits output
         .cmd(ctl_cmd)
         // debugging
         ,.dbg(ctl_dbg)
+    );
+
+    // Game play logic.
+    wire play_dbg;
+    fpga_robots_game_play play(
+        // general system stuff
+        .clk(clk), .rst(rst),
+        // Command bits input, from keyboard or whatever
+        .cmd(ctl_cmd),
+        // access to the tile map memory
+        .tm_adr(tm_adr), .tm_wrt(tm_wrt), .tm_red(tm_red), .tm_wen(tm_wen)
+
+        // debugging
+        ,.dbg(play_dbg)
     );
 
     // Just for testing: attention, F1 to turn it on, F2 to turn it off

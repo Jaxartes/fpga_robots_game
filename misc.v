@@ -286,3 +286,193 @@ module top( );
 endmodule
 `endif
 
+// digit() - Keep track of numeric values 0-9 and allow them to be incremented
+module digit(
+    input clk, // system clock (rising edge active)
+    input rst, // system reset signal (active high synchronous)
+    output reg [3:0]digit = 4'd0, // the digit value
+    input inc, // pulses each time it should increment
+    output reg nine // indicates it's at nine, and another 'inc' pulse
+                    // will cause it to wrap around
+);
+    always @(posedge clk)
+        if (rst) begin
+            digit <= 4'd0;
+            nine <= 1'd0;
+        end else begin
+            if (inc) begin
+                nine <= 1'd0;
+                case(digit)
+                4'd0: digit <= 4'd1;
+                4'd1: digit <= 4'd2;
+                4'd2: digit <= 4'd3;
+                4'd3: digit <= 4'd4;
+                4'd4: digit <= 4'd5;
+                4'd5: digit <= 4'd6;
+                4'd6: digit <= 4'd7;
+                4'd7: digit <= 4'd8;
+                4'd8: begin digit <= 4'd9; nine <= 1'd1; end
+                default: digit <= 4'd0;
+                endcase
+            end
+        end
+endmodule
+
+// digit2() - a 1- or 2-digit number
+module digit2(
+    input clk, // system clock (rising edge active)
+    input rst, // system reset signal (active high synchronous)
+    output [7:0]data, // digit values
+    output reg [1:0]mask = 2'd2, // which digits aren't even shown
+    input inc // trigger adding one to it
+);
+    wire wouldcarry;
+    digit rgt(
+        .clk(clk), .rst(rst),
+        .digit(data[3:0]), .inc(inc), .nine(wouldcarry)
+    );
+    digit lft(
+        .clk(clk), .rst(rst),
+        .digit(data[7:4]), .inc(wouldcarry && inc)
+    );
+    always @(posedge clk)
+        if (rst)
+            mask <= 2'd2; // right digit shows, not left
+        else if (wouldcarry && inc)
+            mask <= 2'd0; // now they both show: we've reached 10
+endmodule
+
+// digit6() - an up to 6-digit number
+module digit6(
+    input clk, // system clock (rising edge active)
+    input rst, // system reset signal (active high synchronous)
+    output [23:0]data, // digit values
+    output reg [5:0]mask = 6'd62, // which digits aren't even shown
+    input inc // trigger adding one to it
+);
+    wire [4:0]nines;
+    wire [5:1]carries;
+
+    // do the digits, in parallel
+    digit d1(
+        .clk(clk), .rst(rst), .digit(data[3:0]),
+        .inc(inc), .nine(nines[0])
+    );
+    digit d10(
+        .clk(clk), .rst(rst), .digit(data[7:4]),
+        .inc(carries[1]), .nine(nines[1])
+    );
+    digit d100(
+        .clk(clk), .rst(rst), .digit(data[11:8]),
+        .inc(carries[2]), .nine(nines[2])
+    );
+    digit d1k(
+        .clk(clk), .rst(rst), .digit(data[15:12]),
+        .inc(carries[3]), .nine(nines[3])
+    );
+    digit d10k(
+        .clk(clk), .rst(rst), .digit(data[19:16]),
+        .inc(carries[4]), .nine(nines[4])
+    );
+    digit d100k(
+        .clk(clk), .rst(rst), .digit(data[23:20]),
+        .inc(carries[5])
+    );
+
+    // compute the carry from one to another
+    assign carries[1] = nines[0] && inc;
+    assign carries[2] = nines[0] && nines[1] && inc;
+    assign carries[3] = nines[0] && nines[1] && nines[2] && inc;
+    wire ln = nines[0] && nines[1] && nines[2] && nines[3];
+    assign carries[4] = ln && inc;
+    assign carries[5] = ln && nines[4] && inc;
+
+    // deal with digits that aren't there, until they are there
+    genvar g;
+    generate
+        for (g = 1; g < 6; g = g + 1) begin : dodigmask
+            always @(posedge clk)
+                if (rst)
+                    mask[g] <= 1'd1; // digit starts out hidden
+                else if (carries[g])
+                    mask[g] <= 1'd0; // but appears when it's nonzero
+        end
+    endgenerate
+endmodule
+
+`ifdef TEST_DIGITS
+// This code is to be run in Icarus Verilog to test digit*()
+module top( );
+    // clock
+    reg clk = 1'd0;
+    initial forever begin #10; clk = ~clk; end
+
+    // reset
+    reg rst = 1'd1;
+    initial begin
+        #100;
+        rst <= 1'd0;
+        #1500;
+        rst <= 1'd1;
+        #100;
+        rst <= 1'd0;
+    end
+
+    // the digits
+    reg trigger = 1'd0;
+    wire [3:0]d1digits;
+    wire [1:0]d2mask;
+    wire [7:0]d2digits;
+    wire [5:0]d6mask;
+    wire [23:0]d6digits;
+    digit d1(
+        .clk(clk), .rst(rst), .digit(d1digits),
+        .inc(trigger)
+    );
+    digit2 d2(
+        .clk(clk), .rst(rst), .data(d2digits), .mask(d2mask),
+        .inc(trigger)
+    );
+    digit6 d6(
+        .clk(clk), .rst(rst), .data(d6digits), .mask(d6mask),
+        .inc(trigger)
+    );
+
+    // operation, while showing the results, and triggering at varying
+    // intervals
+    integer i, j;
+    initial forever begin
+        for (i = 0; i < 4; i = i + 1) begin
+            // increment
+            @(posedge clk);
+            trigger <= 1'd1;
+            @(negedge clk);
+            @(posedge clk);
+            trigger <= 1'd0;
+            @(negedge clk);
+            // delay
+            for (j = 0; j < i; j = j + 1) begin
+                @(posedge clk);
+                @(negedge clk);
+            end
+            // display
+            $write("%c ", d1digits + 48);
+            for (j = 1; j >= 0; j = j - 1) begin
+                if (d2mask[j])
+                    $write(" ");
+                else
+                    $write("%c", 48 + ((d2digits >> (4 * j)) & 15));
+            end
+            $write(" ");
+            for (j = 5; j >= 0; j = j - 1) begin
+                if (d6mask[j])
+                    $write(" ");
+                else
+                    $write("%c", 48 + ((d6digits >> (4 * j)) & 15));
+            end
+            $display("; @%t", $time);
+        end
+    end
+
+endmodule
+`endif // TEST_DIGITS
