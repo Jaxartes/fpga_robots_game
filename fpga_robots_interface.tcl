@@ -84,8 +84,8 @@ foreach letter {t q w y k u h l b j n} {
     set bychar([string toupper $letter]) [list 1 $letter]
 }
 foreach {char shifted keysym} {
-    "." 0 "."
-    ">" 1 "."
+    "." 0 "period"
+    ">" 1 "greater"
 } {
     set bychar($char) [list $shifted $keysym]
 }
