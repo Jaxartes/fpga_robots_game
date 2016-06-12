@@ -221,7 +221,7 @@ module fpga_robots_game_video(
           s2_pa_what, // blank, robot, trash, player
           s2_animode }; // eight animation frames of each
 
-    // if this is in the rightmost 120 grid columns (64 pixels): status area
+    // if this is in the rightmost 8 grid columns (64 pixels): status area
     // pairs of tiles, 0-63, or 0-31 plus invisible "tag" 2-7
     wire [6:0]s2_sa_tile = {
         (s2_tm_red_v[7:6] != 2'd0) ? 2'd0 : s2_tm_red_v[5:4],
