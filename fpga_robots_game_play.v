@@ -46,11 +46,17 @@ module fpga_robots_game_play(
     // The "opcodes" form a state machine; here they are:
     parameter CMD_IDLE         = 4'd0; // wait for a command & perform it
     parameter CMD_DUMP         = 4'd1; // dump game state to serial port
-    parameter CMD_NEWGAME      = 4'd2; // start a game
+    parameter CMD_NEWGAME      = 4'd2; // start a new game
     parameter CMD_NEWLEVEL     = 4'd3; // start a level of the game
     parameter CMD_ENDLEVEL     = 4'd4; // end a level of the game
     parameter CMD_MOVE         = 4'd5; // perform a single move
     parameter CMD_TRASH        = 4'd6; // fill play area with garbage
+
+    // things that go in the play area
+    parameter PAC_EMPTY  = 2'd0;
+    parameter PAC_ROBOT  = 2'd1;
+    parameter PAC_TRASH  = 2'd2;
+    parameter PAC_PLAYER = 2'd3;
 
     // Handling commands which come in through 'cmd'
     reg [7:0]cmd_smove = 8'd0; // single moves pending: E SE S SW W NW N NE
@@ -61,10 +67,9 @@ module fpga_robots_game_play(
     reg cmd_wait = 1'd0; // wait command
     reg cmd_turn = 1'd0; // waste turn command
     reg cmd_quit = 1'd0; // quit command
-    wire cmd_tele_clr, cmd_wait_clr, cmd_turn_clr, cmd_quit_clr;
+    reg cmd_tele_clr, cmd_wait_clr, cmd_turn_clr, cmd_quit_clr;
     reg [2:0]cmd_fns = 3'd0; // F1, F2, F3 keys do "special" things
     reg [2:0]cmd_fns_clr;
-        // XXX generate cmd_*_clr somewhere
 
     always @(posedge clk)
         if (rst) begin
@@ -86,16 +91,31 @@ module fpga_robots_game_play(
 
     // Pseudorandom number generation.  This is used for filling in the
     // playing field at the start of each level.  It's run continuously,
-    // generating three bits per clock.  We usuall want more bits than
-    // that, but we can wait several clocks for them.  Take the result
-    // of the right side of 'prng'.
-    reg [19:0]prng = 20'd1;
-    wire [19:0]prng_succ;
-    lfsr_20_3 prng_lfsr(.in(prng), .out(prng_succ));
-    always @(posedge clk) prng <= rst ? 20'd1 : prng_succ;
+    // generating six bits per clock.  We may want more bits than
+    // that, but we can wait several clocks for them.
+    parameter PRNG_ST2_INIT = 20'h04182; // 50% of the cycle, shifted by 1
+    reg [19:0]prng_st1 = 20'd1;
+    reg [19:0]prng_st2 = PRNG_ST2_INIT;
+    wire [19:0]prng_st1_nxt;
+    wire [19:0]prng_st2_nxt;
+    lfsr_20_3 prng_lfsr1(.in(prng_st1), .out(prng_st1_nxt));
+    lfsr_20_3 prng_lfsr2(.in(prng_st2), .out(prng_st2_nxt));
+    always @(posedge clk) prng_st1 <= rst ? 20'd1 : prng_st1_nxt;
+    always @(posedge clk) prng_st2 <= rst ? PRNG_ST2_INIT : prng_st2_nxt;
+
+    // The PRNG value is built out of the two state values, interleaved
+    // so that the newest part of each (on the right), is on the right.
+    wire [15:0]prng;
+    genvar g;
+    generate
+        for (g = 0; g < 8; g = g + 1) begin
+            assign prng[g * 2    ] = prng_st1[g];
+            assign prng[g * 2 + 1] = prng_st2[g];
+        end
+    endgenerate
 
     // Core state machine "loop"
-    reg [3:0]sml_opcode = CMD_IDLE; // "opcode" running now
+    reg [3:0]sml_opcode = CMD_NEWLEVEL; // "opcode" running now
     reg [6:0]sml_x = 7'd127; // X coordinate in cells, 0-127
     reg [5:0]sml_y = 6'd47; // Y coordinate in pairs of cells, 0-47
         // note: sml_x, sml_y are the current place in the scan,
@@ -106,7 +126,7 @@ module fpga_robots_game_play(
     reg sml_suspend; // halt the loop waiting for something
     always @(posedge clk)
         if (rst) begin
-            sml_opcode <= CMD_IDLE;
+            sml_opcode <= CMD_NEWLEVEL;
             sml_x <= 7'd127;
             sml_y <= 6'd47;
             sml_ph <= 3'd0;
@@ -141,14 +161,17 @@ module fpga_robots_game_play(
     wire sml_rgt = (sml_x[6:3] == 4'd15); // is in right side (1) where scores
                                           // are, or left side (0) game play
                                           // area?
-    wire sml_ph0 = (sml_ph == 3'd0);
+    wire sml_ph0 = (sml_ph == 3'd0); // five clock cycles per address
     wire sml_ph1 = (sml_ph == 3'd1);
     wire sml_ph2 = (sml_ph == 3'd2);
     wire sml_ph3 = (sml_ph == 3'd3);
     wire sml_ph4 = (sml_ph == 3'd4);
+    wire sml_single = // pulses once per opcode, for things that only
+                      // need to be done that one time
+        sml_ph0 && (!sml_x) && (!sml_y);
 
     // Score keeping
-    wire score_reset; // pulse to reset the store
+    reg score_reset; // pulse to reset the store
     wire [7:0]sk_level; // 2-digit level number
     wire [1:0]sk_level_mask; // hide digits
     reg sk_level_inc; // pulse to increment it
@@ -161,19 +184,23 @@ module fpga_robots_game_play(
     wire [23:0]sk_high; // 6-digit high score
     wire [5:0]sk_score_mask; // hide digits
     wire [5:0]sk_high_mask;
-    reg sk_score_inc, sk_high_inc; // pulse to increment
+    reg sk_score_inc; // pulse to increment
     digit6 sk_score_digit6(
         .clk(clk), .rst(rst || score_reset),
         .data(sk_score), .mask(sk_score_mask), .inc(sk_score_inc)
     );
     digit6 sk_high_digit6(
         .clk(clk), .rst(1'd0),
-        .data(sk_high), .mask(sk_high_mask), .inc(sk_high_inc)
+        .data(sk_high), .mask(sk_high_mask),
+        // If the score increases, and it was equal to the high score,
+        // the high score increases.  That's any easier way to keep the
+        // high score up to date, than comparing the two scores and
+        // copying one.
+        .inc(sk_score_inc && (sk_score == sk_high))
     );
 
     // And the logic for writing those scores into memory.  Which happens
     // in many (not all) of the opcodes in the state machine.
-    // XXX do the various parts of this
     reg [23:0]skw_data = 24'd0; // digits to write
     reg [23:0]skw_data_saved = 24'd0; // old value of that
     reg [5:0]skw_mask = 6'd0; // digits to hide
@@ -232,7 +259,57 @@ module fpga_robots_game_play(
 
     assign skw_wen = skw_count && skw_didread;
     assign skw_wrt = { tm_red[7:4], skw_mask[0] ? 4'd10 : skw_data[3:0] };
-    
+
+    // Logic for determining the number of robots that go on a new level.
+    // In the original robots game, there were 10 robots per level on a
+    // 60x22 field.  Our field is 128x96: 9.3x the area.  We'd have 93 robots
+    // per level to achieve the same density.  Split the difference and
+    // 32 robots per level seems about right.  In terms of probability
+    // that's 1/384 per level.  Put the probability in units of 1/2^16
+    // and it's about 171.  We won't bother trying to get an exact number
+    // of robots, just count of the probability to make it mostly right.
+    parameter ROBOT_PROB_CONST = 12'd171; // robots per 2^16 cells
+    reg [11:0]robot_prob = 12'd0;
+    always @(posedge clk)
+        if (rst || score_reset) robot_prob <= 12'd0;
+        else if (sk_score_inc) robot_prob <= robot_prob + ROBOT_PROB_CONST;
+    wire place_robot = (prng[15:0] < { 4'd0, robot_prob });
+
+    // Logic for determining a player position, pseudorandomly, when starting
+    // a new level.
+    reg [6:0]player_x = 7'd0;
+    reg [6:0]player_y = 7'd0;
+    always @(posedge clk)
+        if (rst || score_reset) begin
+            player_x <= 7'd0;
+            player_y <= 7'd0;
+        end else if (sk_score_inc) begin
+            player_x <= prng[6:0]; // 0-127
+            player_y <= { prng[12:11] + 2'd1, prng[10:7] }; // 16-79
+        end
+    wire place_player = (sml_x == player_x) && (sml_y == player_y);
+
+    // Figure out what goes in the current cell, robot player or nothing,
+    // when filling in a new level;
+    // and save a value computed at ph0, so that at ph5 we can use it
+    // to do two cells at once.
+    reg [1:0]place_here;
+    reg [1:0]place_here_old = PAC_EMPTY;
+
+    always @*
+        if (place_player)
+            place_here = PAC_PLAYER;
+        else if (place_robot)
+            place_here = PAC_ROBOT;
+        else
+            place_here = PAC_EMPTY;
+
+    always @(posedge clk)
+        if (rst)
+            place_here_old <= PAC_EMPTY;
+        else if (sml_ph0)
+            place_here_old <= place_here;
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     always @* begin
@@ -242,35 +319,78 @@ module fpga_robots_game_play(
         sml_opcode_next = CMD_IDLE;
         sml_suspend = 1'd0;
         cmd_fns_clr = 3'd0;
+        cmd_tele_clr = 1'd0;
+        cmd_wait_clr = 1'd0;
+        cmd_turn_clr = 1'd0;
+        cmd_quit_clr = 1'd0;
         skw_didread = 1'd0;
         sk_level_inc = 1'd0;
         sk_score_inc = 1'd0;
-        sk_high_inc = 1'd0;
+        score_reset = 1'd0;
 
         case(sml_opcode)
         CMD_IDLE: begin
             // This is where we handle commands received from 'cmd' and
             // processed through 'cmd_*'
             if (cmd_fns[2]) begin // F3: trash; increment score
-                cmd_fns_clr[2] = 1'd1;
-                sml_opcode_next = CMD_TRASH;
+                cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
                 sk_score_inc = 1'd1;
-            end else if (cmd_fns[0]) begin // F1: increment level
-                cmd_fns_clr[0] = 1'd1;
+                sml_opcode_next = CMD_TRASH;
+            end else if (cmd_fns[0]) begin // F1: new level
+                cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
                 sk_level_inc = 1'd1;
-            end else if (cmd_fns[1]) begin // F2: increment high score
-                cmd_fns_clr[1] = 1'd1;
-                sk_high_inc = 1'd1;
+                sml_opcode_next = CMD_NEWLEVEL;
+            end else if (cmd_fns[1]) begin // F2: YYY for now, does nothing
+                cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
+            end else if (cmd_quit) begin // q/esc/bs: new game
+                cmd_quit_clr = 1'd1;
+                score_reset = 1'd1; // reset score & level (but not high)
+                sml_opcode_next = CMD_NEWGAME; // and fill in the level
             end
             // XXX handle all the commands here
         end
-        CMD_DUMP: begin
-            // XXX
-        end
-        CMD_NEWGAME: begin
-            // XXX
+        CMD_NEWGAME : begin
+            // Begin a new game.  This begins the first level of the game.
+            // Hardly anything is done in this opcode, even though we give
+            // it plenty of time.  Much is done in CMD_IDLE (before
+            // CMD_NEWGAME) and the rest in CMD_NEWLEVEL (after CMD_NEWGAME).
+            // The one thing that doesn't fit between is pulsing sk_level_inc,
+            // because it can't happen at the same time as score_reset.
+
+            // pulse sk_level_inc once, during the entire time this opcode runs.
+            sk_level_inc = sml_single;
         end
         CMD_NEWLEVEL: begin
+            // Begin a new level (possibly a new game).  Does the following:
+            //      + clears existing play field
+            //      + fills in new robots
+            //      + fills in player
+            // When entering this opcode do the following:
+            //      + pulse sk_level_inc; that will increment the next level and
+            //      increase the number of robots accordingly, and come up
+            //      with a pseudorandom player position
+            // At each address (five clocks, two playing area cells)
+            // it does the following:
+            //      1st clock: collects the decision of whether the top cell of
+            //          the pair should have a robot
+            //      5th clock: decides whether the bottom cell of the pair
+            //          should have a robot; and stores the resulting byte
+            //          of play area memory.
+            // the 1st clock stuff is done elsewhere, see place_here and
+            // place_here_old.
+            // The reason for doing nothing for three cycles in between,
+            // is just so that the pseudo random number generator can refresh.
+
+            tm_adr = sml_adr;
+            // decision to write: 5th clock & is in play area not the score
+            tm_wen = sml_ph4 && (!sml_rgt);
+            tm_wrt = {
+                4'd0, // invisible temporary storage, nothing for now
+                place_here, // lower cell
+                place_here_old // upper cell
+            };
+        end
+        CMD_DUMP: begin
             // XXX
         end
         CMD_ENDLEVEL: begin
@@ -298,8 +418,5 @@ module fpga_robots_game_play(
             end
         end
         endcase
-        // XXX
     end
-
-    // XXX
 endmodule
