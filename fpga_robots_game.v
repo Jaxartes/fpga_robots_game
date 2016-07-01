@@ -88,6 +88,7 @@ module fpga_robots_game(
     wire [7:0] tm_wrt; // access to tile map memory: write data
     wire [7:0] tm_red; // access to tile map memory: read data
     wire       tm_wen; // access to tile map memory: write enable
+    wire framepulse; // there's a pulse 60 times a second
     fpga_robots_game_video video(
         // system interface
         .clk(clk), .rst(rst),
@@ -110,6 +111,7 @@ module fpga_robots_game(
         , .anitog(anitog)
 `endif
         , .attention(attention)
+        , .frame(framepulse)
     );
 
     // convert 6 bit to 12 bit color
@@ -193,6 +195,8 @@ module fpga_robots_game(
         .clk(clk), .rst(rst),
         // Command bits input, from keyboard or whatever
         .cmd(ctl_cmd),
+        // output: start a beep
+        .want_attention(want_attention),
         // access to the tile map memory
         .tm_adr(tm_adr), .tm_wrt(tm_wrt), .tm_red(tm_red), .tm_wen(tm_wen)
 
@@ -200,14 +204,17 @@ module fpga_robots_game(
         ,.dbg(play_dbg)
     );
 
-    // Just for testing: attention, F1 to turn it on, F2 to turn it off
-    reg attention_r = 1'd0;
-    assign attention = attention_r;
+    // Attention signal: visual and audible for ~1/2 second, counted by
+    // video frames
+    reg [4:0]atnctr = 5'd0;
+    assign attention = |atnctr;
     always @(posedge clk)
         if (rst)
-            attention_r <= 1'd0;
-        else if (ctl_cmd[9])
-            attention_r <= 1'd0;
-        else if (ctl_cmd[8])
-            attention_r <= 1'd1;
+            atnctr <= 5'd0;
+        else if (want_attention) begin
+            atnctr <= 5'd30;
+        end else if (framepulse && attention) begin
+            atnctr <= atnctr - 5'd1;
+        end
+
 endmodule

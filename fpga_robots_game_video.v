@@ -52,6 +52,8 @@ module fpga_robots_game_video(
 `endif
     // attention: mess with the display so the user will notice
     , input attention
+    // frame: pulse every time a new frame is started
+    , output frame
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -98,6 +100,8 @@ module fpga_robots_game_video(
             s1_y_zero <= 1'd1;
         else if (s1_x_wrap)
             s1_y_zero <= s1_y_wrap;
+
+    assign frame = s1_x_zero && s1_y_zero;
 
     // // // //
     // Stages 1-2: Tile map memory.  Inputs to it are stage 1, outputs

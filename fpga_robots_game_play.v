@@ -20,6 +20,9 @@ module fpga_robots_game_play(
     // to keep track of pending commands.
     input [15:0]cmd,
 
+    // Signal to get the user's attention, like with a beep
+    output want_attention,
+
     // Access to the tile map memory
     output reg [12:0]tm_adr, // address: location we want to access
     output reg [7:0]tm_wrt, // data to write to it
@@ -308,6 +311,10 @@ module fpga_robots_game_play(
         (sml_x == player_x) && // right cell horizontally
         (sml_y == player_y[6:1]); // right *pair* of cells vertically
 
+    // Logic for getting the player's attention
+    reg want_attention_f2;
+    assign want_attention = want_attention_f2; // XXX add more
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     always @* begin
@@ -325,6 +332,7 @@ module fpga_robots_game_play(
         sk_level_inc = 1'd0;
         sk_score_inc = 1'd0;
         score_reset = 1'd0;
+        want_attention_f2 = 1'd0;
 
         case(sml_opcode)
         CMD_IDLE: begin
@@ -338,8 +346,9 @@ module fpga_robots_game_play(
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
                 sk_level_inc = 1'd1;
                 sml_opcode_next = CMD_NEWLEVEL;
-            end else if (cmd_fns[1]) begin // F2: YYY for now, does nothing
+            end else if (cmd_fns[1]) begin // F2: beep
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
+                want_attention_f2 = 1'd1; // signal for a beep
             end else if (cmd_quit) begin // q/esc/bs: new game
                 cmd_quit_clr = 1'd1;
                 score_reset = 1'd1; // reset score & level (but not high)
@@ -439,4 +448,6 @@ module fpga_robots_game_play(
         end
         endcase
     end
+
+    assign want_attention = 1'd0; // XXX dummy signal; do for real sometime
 endmodule
