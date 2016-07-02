@@ -95,28 +95,14 @@ module fpga_robots_game_play(
 
     // Pseudorandom number generation.  This is used for filling in the
     // playing field at the start of each level.  It's run continuously,
-    // generating six bits per clock.  We may want more bits than
+    // generating eight bits per clock.  We may want more bits than
     // that, but we can wait several clocks for them.
-    parameter PRNG_ST2_INIT = 20'h04182; // 50% of the cycle, shifted by 1
-    reg [19:0]prng_st1 = 20'd1;
-    reg [19:0]prng_st2 = PRNG_ST2_INIT;
-    wire [19:0]prng_st1_nxt;
-    wire [19:0]prng_st2_nxt;
-    lfsr_20_3 prng_lfsr1(.in(prng_st1), .out(prng_st1_nxt));
-    lfsr_20_3 prng_lfsr2(.in(prng_st2), .out(prng_st2_nxt));
-    always @(posedge clk) prng_st1 <= rst ? 20'd1 : prng_st1_nxt;
-    always @(posedge clk) prng_st2 <= rst ? PRNG_ST2_INIT : prng_st2_nxt;
+    reg [28:0]prng_st = 29'd1;
+    wire [28:0]prng_st_nxt;
+    lfsr_29_8 prng_lfsr(.in(prng_st), .out(prng_st_nxt));
 
-    // The PRNG value is built out of the two state values, interleaved
-    // so that the newest part of each (on the right), is on the right.
-    wire [15:0]prng;
-    genvar g;
-    generate
-        for (g = 0; g < 8; g = g + 1) begin : prng_generation
-            assign prng[g * 2    ] = prng_st1[g];
-            assign prng[g * 2 + 1] = prng_st2[g];
-        end
-    endgenerate
+    // Extract the most recent 16 bits (two clock cycles' worth)
+    wire [15:0]prng = prng_st[15:0];
 
     // Core state machine "loop"
     reg [3:0]sml_opcode = CMD_BOOT; // "opcode" running now
@@ -286,7 +272,7 @@ module fpga_robots_game_play(
     wire place_robot = (prng[15:0] < { 4'd0, robot_prob });
 
     // and in each pair of cells, save the top value (computed in ph0)
-    // until we get the bottom value (computed in ph4)
+    // until we get the bottom value (computed in ph3)
     reg place_robot_old = 1'd0;
     always @(posedge clk)
         if (rst)
@@ -398,7 +384,7 @@ module fpga_robots_game_play(
                 tm_wrt = skw_wrt;
             end else begin
                 // playing area update
-                tm_wen = sml_ph4 && (!sml_rgt);
+                tm_wen = sml_ph3 && (!sml_rgt);
                 tm_wrt[7:4] = 4'd0; // invisible temp storage, not used here
                 if (place_player_pair && player_y[0])
                     tm_wrt[3:2] = PAC_PLAYER; // lower cell

@@ -188,6 +188,43 @@ module top( );
 endmodule
 `endif
 
+// lfsr_29_8 -- LFSR delivering eight bits at once.  This module doesn't
+// contain any of the state, it just contains the transfer function.
+// Take the result off out[7:0]
+module lfsr_29_8(
+    input [28:0]in,
+    output [28:0]out
+);
+    assign out[28:8] = in[20:0];
+    assign out[7] = in[26] ^ in[28];
+    assign out[6] = in[25] ^ in[27];
+    assign out[5] = in[24] ^ in[26];
+    assign out[4] = in[23] ^ in[25];
+    assign out[3] = in[22] ^ in[24];
+    assign out[2] = in[21] ^ in[23];
+    assign out[1] = in[20] ^ in[22];
+    assign out[0] = in[19] ^ in[21];
+endmodule
+
+`ifdef ANALYZE_PRNG_3
+// This code is to be run in Icarus Verilog to analyze the output of
+// lfsr_29_8()
+module top( );
+    reg [28:0] state;
+    wire [28:0] successor;
+    lfsr_29_8 prng(.in(state), .out(successor));
+
+    initial begin
+        state = 1'd1;
+        forever begin
+            $display("%08x %02x %08b", state, state[7:0], state[7:0]);
+            #1;
+            state = successor;
+        end
+    end
+endmodule
+`endif
+
 // sinewaver() - Generate a 16 bit sinusoidal wave.  The period is
 // 1609 pulses of 'trigger'
 module sinewaver(
