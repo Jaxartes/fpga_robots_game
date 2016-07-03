@@ -308,14 +308,18 @@ module fpga_robots_game_play(
     // a new level.
     reg [6:0]player_x = 7'd0;
     reg [6:0]player_y = 7'd0;
-    wire [2:0]y_middling = prng[12:11] + 2'd1;
+    wire [6:0]simple_new_player_x = prng[6:0]; // 0-127, but 120-127 not good
+    wire [6:0]new_player_x = (prng[12:6] < 7'd120) ?
+                             prng[12:6] : // 0-119
+                             7'd60; // 60
+    wire [6:0]new_player_y = { 1'd0, prng[5:0] } + 6'd16; // 16-79
     always @(posedge clk)
         if (rst || score_reset) begin
             player_x <= 7'd0;
             player_y <= 7'd0;
         end else if (sk_level_inc) begin
-            player_x <= prng[6:0]; // 0-127
-            player_y <= { y_middling, prng[10:7] }; // 16-79
+            player_x <= new_player_x;
+            player_y <= new_player_y;
         end
     wire place_player_pair =
         (sml_x == player_x) && // right cell horizontally
