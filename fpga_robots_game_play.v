@@ -100,6 +100,7 @@ module fpga_robots_game_play(
     reg [28:0]prng_st = 29'd1;
     wire [28:0]prng_st_nxt;
     lfsr_29_8 prng_lfsr(.in(prng_st), .out(prng_st_nxt));
+    always @(posedge clk) prng_st <= rst ? 29'd1 : prng_st_nxt;
 
     // Extract the most recent 16 bits (two clock cycles' worth)
     wire [15:0]prng = prng_st[15:0];
@@ -434,6 +435,4 @@ module fpga_robots_game_play(
         end
         endcase
     end
-
-    assign want_attention = 1'd0; // XXX dummy signal; do for real sometime
 endmodule
