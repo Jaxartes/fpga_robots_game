@@ -30,7 +30,7 @@ module serial_port(
     // is simpler and fits into the RX logic below.)
     reg [7:0]txf_data = 8'd0; // the byte data
     reg [1:0]txf_sema = 2'd0; // these bits are != if there's a byte in there
-    assign tx_rdy = txf_sema[0] != txf_sema[1];
+    assign tx_rdy = txf_sema[0] == txf_sema[1];
     always @(posedge clk)
         if (rst) begin
             txf_data <= 8'd0;

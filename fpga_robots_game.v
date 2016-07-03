@@ -170,6 +170,7 @@ module fpga_robots_game(
     // Control interface: Receives signals from serial port & from PS/2
     // keyboard.
     wire [15:0]ctl_cmd;
+    wire ctl_dumpcmd, ctl_dumppause;
     wire ctl_dbg;
     fpga_robots_game_control ctl(
         // general system stuff
@@ -179,13 +180,13 @@ module fpga_robots_game(
         // Serial port: another way to get commands
         .ser_rx_dat(ser_rx_dat),
         .ser_rx_stb(ser_rx_stb),
-        .ser_tx_dat(ser_tx_dat),
-        .ser_tx_stb(ser_tx_stb),
-        .ser_tx_rdy(ser_tx_rdy),
         // Command bits output
-        .cmd(ctl_cmd)
+        .cmd(ctl_cmd),
+        .dumpcmd_start(ctl_dumpcmd),
+        .dumpcmd_pause(ctl_dumppause),
+
         // debugging
-        ,.dbg(ctl_dbg)
+        .dbg(ctl_dbg)
     );
 
     // Game play logic.
@@ -195,13 +196,19 @@ module fpga_robots_game(
         .clk(clk), .rst(rst),
         // Command bits input, from keyboard or whatever
         .cmd(ctl_cmd),
+        .dumpcmd_start(ctl_dumpcmd),
+        .dumpcmd_pause(ctl_dumppause),
         // output: start a beep
         .want_attention(want_attention),
         // access to the tile map memory
-        .tm_adr(tm_adr), .tm_wrt(tm_wrt), .tm_red(tm_red), .tm_wen(tm_wen)
+        .tm_adr(tm_adr), .tm_wrt(tm_wrt), .tm_red(tm_red), .tm_wen(tm_wen),
+        // serial port access for data dump
+        .ser_tx_dat(ser_tx_dat),
+        .ser_tx_stb(ser_tx_stb),
+        .ser_tx_rdy(ser_tx_rdy),
 
         // debugging
-        ,.dbg(play_dbg)
+        .dbg(play_dbg)
     );
 
     // Attention signal: visual and audible for ~1/2 second, counted by

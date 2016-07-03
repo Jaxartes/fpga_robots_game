@@ -23,18 +23,17 @@ module fpga_robots_game_control(
     input [7:0]ser_rx_dat, // data
     input      ser_rx_stb, // strobe: will pulse when data is new & valid
 
-    // transmit data to serial port
-    output reg [7:0]ser_tx_dat, // data
-    output reg      ser_tx_stb, // strobe: will pulse when data is new & valid
-    input           ser_tx_rdy, // ready: will be high when ready to transmit
-
     // Output command bits, as found in the keyboard lookup table.  They'll
     // be pulsed when the command is issued, it's up to the rest of the
     // game logic to keep track of pending commands.
-    output reg [15:0]cmd = 16'd0
+    output reg [15:0]cmd = 16'd0,
+
+    // Commands to perform and control data dump
+    output reg dumpcmd_start = 1'd0, // pulsed to start a dump
+    output reg dumpcmd_pause = 1'd0, // high as long as dump should be paused
 
     // debugging, just in case we want it
-    , output dbg
+    output dbg
 );
 `ifdef FPGA_ROBOTS_BIG_KEY_TABLE
     // Lookup table for controlling the keyboard: 512 x 16 bits; expanded
@@ -78,14 +77,34 @@ module fpga_robots_game_control(
             fourbuf <= 4'd0;
             ser_kc_stb <= 1'd0;
             ser_kc_dat <= 8'd0;
+            dumpcmd_start <= 1'd0;
+            dumpcmd_pause <= 1'd0;
         end else begin
             ser_kc_stb <= 1'd0;
+            dumpcmd_start <= 1'd0;
             if (ser_rx_stb) begin
                 case (ser_rx_dat[7:4])
+                4'h1: begin
+                    if (ser_rx_dat[3:0] == 4'd1) 
+                        // 17: XON, resume transmission
+                        dumpcmd_pause <= 1'd0;
+                    else if (ser_rx_dat[3:0] == 4'd3)
+                        // 19: XOFF, pause transmission
+                        dumpcmd_pause <= 1'd1;
+                end
+                // 64-79 - buffer a half byte
                 4'h4: fourbuf <= ser_rx_dat[3:0];
+                // 80-95 - fake a byte received from keyboard
                 4'h5: begin
                     ser_kc_dat <= { fourbuf, ser_rx_dat[3:0] };
                     ser_kc_stb <= 1'd1;
+                end
+                4'h6: begin
+                    if (ser_rx_dat[3:0] == 4'd0) begin
+                        // 96: dump game state
+                        dumpcmd_start <= 1'd1;
+                        dumpcmd_pause <= 1'd0;
+                    end
                 end
                 endcase
             end

@@ -19,6 +19,8 @@ module fpga_robots_game_play(
     // be pulsed when the command is issued, it's up to this module
     // to keep track of pending commands.
     input [15:0]cmd,
+    input dumpcmd_start, // pulses to trigger a dump
+    input dumpcmd_pause, // high to indicate dump output is paused
 
     // Signal to get the user's attention, like with a beep
     output want_attention,
@@ -27,10 +29,15 @@ module fpga_robots_game_play(
     output reg [12:0]tm_adr, // address: location we want to access
     output reg [7:0]tm_wrt, // data to write to it
     output reg tm_wen, // enable writing
-    input [7:0]tm_red // data read from last clock cycle's address
+    input [7:0]tm_red, // data read from last clock cycle's address
+
+    // Transmit data on the serial port, for a debugging dump
+    output [7:0]ser_tx_dat, // the data
+    output      ser_tx_stb, // pulse when ser_tx_dat is valid & new
+    input       ser_tx_rdy, // high when all data has been transmitted
 
     // debugging, just in case we want it
-    , output dbg
+    output dbg
 );
 
     // This mainly works by going through the tile map memory in reverse
@@ -74,6 +81,8 @@ module fpga_robots_game_play(
     reg cmd_tele_clr, cmd_wait_clr, cmd_turn_clr, cmd_quit_clr;
     reg [2:0]cmd_fns = 3'd0; // F1, F2, F3 keys do "special" things
     reg [2:0]cmd_fns_clr;
+    reg cmd_dump_pending = 1'd0; // a 'dump' has been requested
+    reg cmd_dump_clr;
 
     always @(posedge clk)
         if (rst) begin
@@ -81,6 +90,7 @@ module fpga_robots_game_play(
             cmd_rmove <= 8'd0;
             { cmd_tele, cmd_wait, cmd_turn, cmd_quit } <= 4'd0;
             cmd_fns <= 3'd0;
+            cmd_dump_pending <= 1'd0;
         end else begin
             cmd_smove <= (cmd_smove & ~cmd_smove_clr) |
                          (cmd[15] ? 8'd0 : cmd[7:0]);
@@ -91,6 +101,8 @@ module fpga_robots_game_play(
             cmd_turn <= (cmd_turn & ~cmd_turn_clr) | cmd[12];
             cmd_quit <= (cmd_quit & ~cmd_quit_clr) | cmd[11];
             cmd_fns <= (cmd_fns & ~cmd_fns_clr) | cmd[10:8];
+            cmd_dump_pending <= (cmd_dump_pending & ~cmd_dump_clr) |
+                dumpcmd_start;
         end
 
     // Pseudorandom number generation.  This is used for filling in the
@@ -112,6 +124,8 @@ module fpga_robots_game_play(
         // note: sml_x, sml_y are the current place in the scan,
         // which doesn't necessarily correspond to the memory being accessed
         // every time.
+    reg sml_x_max = 1'd1; // sml_x == 127
+    reg sml_y_max = 1'd1; // sml_y == 47
     reg [2:0]sml_ph = 3'd0; // memory access phases at each position
     reg [3:0]sml_opcode_next; // next command to perform
     reg sml_suspend; // halt the loop waiting for something
@@ -119,7 +133,9 @@ module fpga_robots_game_play(
         if (rst) begin
             sml_opcode <= CMD_BOOT;
             sml_x <= 7'd127;
+            sml_x_max <= 1'd1;
             sml_y <= 6'd47;
+            sml_y_max <= 1'd1;
             sml_ph <= 3'd0;
         end else if (sml_suspend) begin
             // nothing happening, we're just waiting
@@ -132,16 +148,21 @@ module fpga_robots_game_play(
         end else if (sml_x != 7'd0) begin
             // next cell pair horizontally
             sml_x <= sml_x - 7'd1;
+            sml_x_max <= 1'd0;
             sml_ph <= 3'd0;
         end else if (sml_y != 6'd0) begin
             // next row of cell pairs
             sml_x <= 7'd127;
+            sml_x_max <= 1'd1;
             sml_y <= sml_y - 6'd1;
+            sml_y_max <= 1'd0;
             sml_ph <= 3'd0;
         end else begin
             // completed this opcode
             sml_x <= 7'd127;
+            sml_x_max <= 1'd1;
             sml_y <= 6'd47;
+            sml_y_max <= 1'd1;
             sml_opcode <= sml_opcode_next;
             sml_ph <= 3'd0;
         end
@@ -157,9 +178,11 @@ module fpga_robots_game_play(
     wire sml_ph2 = (sml_ph == 3'd2);
     wire sml_ph3 = (sml_ph == 3'd3);
     wire sml_ph4 = (sml_ph == 3'd4);
+    wire sml_x_min = !(|sml_x); // sml_x == 0
+    wire sml_y_min = !(|sml_y); // sml_y == 0
     wire sml_single = // pulses once per opcode, for things that only
                       // need to be done that one time
-        sml_ph0 && (!sml_x) && (!sml_y);
+        sml_ph0 && sml_x_min && sml_y_min;
 
     // Score keeping
     reg score_reset; // pulse to reset the store
@@ -302,6 +325,48 @@ module fpga_robots_game_play(
     reg want_attention_f2;
     assign want_attention = want_attention_f2; // XXX add more
 
+    // Logic for data dump over the serial port
+    reg dump_going;
+    wire dump_suspend = !ser_tx_rdy;
+    reg [7:0]dump_tx_dat;
+    reg dump_tx_stb;
+    assign ser_tx_dat = dump_tx_dat;
+    assign ser_tx_stb =
+        dump_tx_stb && ser_tx_rdy && dump_going && !dumpcmd_pause;
+
+    always @* begin
+        dump_tx_dat = 8'd0;
+        dump_tx_stb = 1'd0;
+
+        if (sml_ph0 && sml_x_max && sml_y_max) begin
+            // start the dump
+            dump_tx_dat = 8'd35;
+            dump_tx_stb = 1'd1;
+        end else if (sml_ph1 && sml_x_max) begin
+            // start a row of the dump
+            dump_tx_dat = 8'd36;
+            dump_tx_stb = 1'd1;
+        end else if (sml_ph2) begin
+            // single byte's worth of data
+            if (sml_rgt && tm_red[7])
+                // 64-127: 6 bits data, tagged scoreboard information
+                dump_tx_dat = { 2'd1, tm_red[6:5], tm_red[3:0] };
+            else
+                // 48-63: 4 bits data, either untagged scoreboard information
+                // or normal visible play area information
+                dump_tx_dat = { 4'd3, tm_red[3:0] };
+            dump_tx_stb = 1'd1;
+        end else if (sml_ph3 && sml_x_min) begin
+            // end a row of the dump
+            dump_tx_dat = 8'd37;
+            dump_tx_stb = 1'd1;
+        end else if (sml_ph4 && sml_x_min && sml_y_min) begin
+            // end the dump
+            dump_tx_dat = 8'd38;
+            dump_tx_stb = 1'd1;
+        end
+    end
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     always @* begin
@@ -315,11 +380,13 @@ module fpga_robots_game_play(
         cmd_wait_clr = 1'd0;
         cmd_turn_clr = 1'd0;
         cmd_quit_clr = 1'd0;
+        cmd_dump_clr = 1'd0;
         skw_didread = 1'd0;
         sk_level_inc = 1'd0;
         sk_score_inc = 1'd0;
         score_reset = 1'd0;
         want_attention_f2 = 1'd0;
+        dump_going = 1'd0;
 
         case(sml_opcode)
         CMD_IDLE: begin
@@ -340,6 +407,9 @@ module fpga_robots_game_play(
                 cmd_quit_clr = 1'd1;
                 score_reset = 1'd1; // reset score & level (but not high)
                 sml_opcode_next = CMD_NEWGAME; // and fill in the level
+            end else if (cmd_dump_pending) begin // data dump over serial port
+                cmd_dump_clr = 1'd1;
+                sml_opcode_next = CMD_DUMP;
             end
             // XXX handle all the commands here
         end
@@ -402,7 +472,11 @@ module fpga_robots_game_play(
                 end
         end
         CMD_DUMP: begin
-            // XXX
+            // Dump: Dump the data in the tile map memory over the serial
+            // port.
+            dump_going = 1'd1;
+            tm_adr = sml_adr;
+            sml_suspend = dump_suspend;
         end
         CMD_ENDLEVEL: begin
             // XXX
