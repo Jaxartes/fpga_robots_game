@@ -25,6 +25,9 @@ module fpga_robots_game_play(
     // Signal to get the user's attention, like with a beep
     output want_attention,
 
+    // When is video in vertical blanking interval?
+    input vbi,
+
     // Access to the tile map memory
     output reg [12:0]tm_adr, // address: location we want to access
     output reg [7:0]tm_wrt, // data to write to it
@@ -59,9 +62,11 @@ module fpga_robots_game_play(
     parameter CMD_NEWGAME      = 4'd2; // start a new game
     parameter CMD_NEWLEVEL     = 4'd3; // start a level of the game
     parameter CMD_ENDLEVEL     = 4'd4; // end a level of the game
-    parameter CMD_MOVE         = 4'd5; // perform a single move
     parameter CMD_TRASH        = 4'd6; // fill play area with garbagea
     parameter CMD_BOOT         = 4'd7; // start-up time
+    parameter CMD_MV_ZEROTOP   = 4'd8; // zero the upper half bytes
+    parameter CMD_MV_DOMOVE    = 4'd9; // do a single move, into upper halves
+    parameter CMD_MV_COPYDOWN  = 4'd10; // copy move results from upper halves
 
     // things that go in the play area
     parameter PAC_EMPTY  = 2'd0;
@@ -371,6 +376,79 @@ module fpga_robots_game_play(
         end
     end
 
+    // Logic for handling player move commands; see CMD_MV_* below.
+    // Major signals:
+    //      move_player_{x,y} - cell coordinates player is moving to
+    //      moving_{n,s,e,w} - 1 or 2 of these high to indicate direction
+    //                         of current move command
+    reg [6:0]move_player_x = 7'd0; // XXX set this for real
+    reg [6:0]move_player_y = 7'd0; // XXX set this for real
+    reg moving_n = 1'd0;
+    reg moving_s = 1'd0;
+    reg moving_e = 1'd0;
+    reg moving_w = 1'd0;
+    always @(posedge clk)
+        if (rst) begin
+            { moving_n, moving_s, moving_e, moving_w } <= 4'd0;
+        end else begin
+            // XXX generate moving_*
+        end
+
+    // XXX there's more to be added here
+
+    // Logic for moving the playing field elements (esp robots) when the
+    // player moves; see CMD_MV_DOMOVE below.
+    // Major signals:
+    //      move_red - low (visible) half of byte that was read in ph0 that
+    //          contains the elements being moved
+    //      move_from_where_{x,y} - coordinates element is being moved from
+    //      move_what - current cell's two-bit extract from that byte (PAC_*)
+    //      move_to_adr - address of the cell it'd move *to*
+    //      move_to_half - cell in upper (0) or lower (1) half of the byte?
+    //      move_result - byte to write to that address
+    wire [3:0]move_red = sml_ph1 ? tm_red : move_red_save;
+    reg [3:0]move_red_save = 4'd0;
+    always @(posedge clk) move_red_save <= rst ? 4'd0 : move_red;
+
+    wire [6:0]move_from_where_x = sml_x;
+    wire [6:0]move_from_where_y = { sml_y, (sml_ph3 || sml_ph4) };
+
+    wire [1:0]move_what = move_from_where_y[0] ? move_red[3:2] : move_red[1:0];
+
+    reg [6:0]move_to_x_delta;
+    reg [6:0]move_to_y_delta;
+    always @* begin
+        move_to_x_delta = 7'd0;
+        move_to_y_delta = 7'd0;
+        if (move_what == PAC_ROBOT) begin
+            // robot can move; figure out direction in X & Y dimensions
+            if (move_player_x < move_from_where_x) begin
+                // leftward
+                move_to_x_delta = 7'd127;
+            end else if (move_player_x > move_from_where_x) begin
+                // rightward
+                move_to_x_delta = 7'd1;
+            end
+            if (move_player_y < move_from_where_y) begin
+                // upward
+                move_to_y_delta = 7'd127;
+            end else if (move_player_y > move_from_where_y) begin
+                // downward
+                move_to_y_delta = 7'd1;
+            end
+        end
+    end
+    wire [6:0]move_to_x = move_from_where_x + move_to_x_delta;
+    wire [6:0]move_to_y = move_from_where_y + move_to_y_delta;
+    wire [12:0]move_to_adr = { move_to_y[6:1], move_to_x[6:0] };
+    wire move_to_half = move_to_y[0];
+
+    reg [7:0]move_result;
+    always @* begin
+        move_result = tm_red;
+        // XXX actually set move_result
+    end
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     always @* begin
@@ -485,9 +563,6 @@ module fpga_robots_game_play(
         CMD_ENDLEVEL: begin
             // XXX
         end
-        CMD_MOVE: begin
-            // XXX
-        end
         CMD_TRASH: begin
             // "Trash" command: fill play area with garbage, for testing
             // and debugging.
@@ -510,6 +585,69 @@ module fpga_robots_game_play(
             // At reset or startup: start a new game
             score_reset = 1'd1; // reset score & level (but not high)
             sml_opcode_next = CMD_NEWGAME; // and fill in the level
+        end
+        CMD_MV_ZEROTOP: begin
+            // As part of a move, zero the upper 4 bits of each byte in
+            // the play area.
+
+            // Those will later be used for storing the results of the
+            // move, provisionally, before they're copied down to the lower
+            // 4 bits where they actually display.
+
+            // Uses sml_ph0 to read the byte and sml_ph1 to write back
+            // the modified value.
+
+            tm_adr = sml_adr;
+            tm_wen = sml_ph1 && !sml_rgt;
+            tm_wrt = { 4'd0, tm_red[3:0] };
+
+            // And the opcode CMD_MV_DOMOVE always follows it.
+            sml_opcode_next = CMD_MV_DOMOVE;
+        end
+        CMD_MV_DOMOVE: begin
+            // Do a move: Transferring playing field elements to their
+            // new positions, in the upper (invisible) half of each byte
+            // of the playing area.  Later (in CMD_MV_COPYDOWN) this will
+            // be copied into the lower (visible) halves of the bytes.
+
+            // This opcode uses all five phases:
+            //      ph0 - reads the byte to move from
+            //      ph1 - reads the byte to move the upper part to
+            //      ph2 - writes back that byte, modified
+            //      ph3 - reads the byte to move the lower part to
+            //      ph4 - writes back that byte, modified
+
+            if (sml_ph0) begin
+                // ph0 - reads the byte to move from
+                tm_adr = sml_adr;
+            end
+            if (sml_ph1 || sml_ph2 || sml_ph3 || sml_ph4) begin
+                // ph1-ph4 - operations on the "move to" address
+                tm_adr = move_to_adr;
+            end
+            tm_wen = (sml_ph2 || sml_ph4); // these operations perform write
+            tm_wrt = move_result; // only matters in ph2 & ph4
+            // XXX handle successor opcode
+            // XXX handle score keeping
+            // XXX handle failure
+        end
+        CMD_MV_COPYDOWN: begin
+            // At the end of a successful move, copy from the upper half
+            // bytes (which hold temporary results) to the lower half
+            // (which hold displayed results).
+
+            // Halt operation until we're in the vertical blanking interval,
+            // for the best looking results
+            sml_suspend = !vbi;
+
+            // Do the copy, by reading at ph0 & writing back at ph1.
+            tm_adr = sml_adr;
+            tm_wen = sml_ph1 && !sml_rgt;
+            tm_wrt = { 4'd0, tm_red[7:4] };
+
+            // When this is done, go back to CMD_IDLE which gets to decide
+            // what we'll be doing.
+            sml_opcode_next = CMD_IDLE;
         end
         endcase
     end

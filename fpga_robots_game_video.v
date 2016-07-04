@@ -54,6 +54,9 @@ module fpga_robots_game_video(
     , input attention
     // frame: pulse every time a new frame is started
     , output frame
+    // vbi: raise when in the "vertical blanking interval", in particular
+    // when the tile-map-reading pipeline stage is in the VBI: at stage 1.
+    , output vbi
 );
     // This code is pipeline oriented.  Each internal signal is marked
     // with its pipeline stage as prefix like "s1_".  Some signals are
@@ -140,6 +143,9 @@ module fpga_robots_game_video(
             // read-only internal ("_v") port
             s2_tm_red_v <= tile_map[s1_tm_adr_v];
         end
+
+    // vertical blank signal for memory access control
+    wire vbi = (s1_y[9:8] == 2'd3); // Y >= 768
 
 `ifdef FPGA_ROBOTS_ANIMATE
     // // // //

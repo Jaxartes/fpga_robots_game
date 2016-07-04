@@ -88,7 +88,8 @@ module fpga_robots_game(
     wire [7:0] tm_wrt; // access to tile map memory: write data
     wire [7:0] tm_red; // access to tile map memory: read data
     wire       tm_wen; // access to tile map memory: write enable
-    wire framepulse; // there's a pulse 60 times a second
+    wire framepulse;   // there's a pulse 60 times a second
+    wire vbi;          // it's in the vertical blanking interval
     fpga_robots_game_video video(
         // system interface
         .clk(clk), .rst(rst),
@@ -112,6 +113,7 @@ module fpga_robots_game(
 `endif
         , .attention(attention)
         , .frame(framepulse)
+        , .vbi(vbi)
     );
 
     // convert 6 bit to 12 bit color
@@ -206,6 +208,8 @@ module fpga_robots_game(
         .ser_tx_dat(ser_tx_dat),
         .ser_tx_stb(ser_tx_stb),
         .ser_tx_rdy(ser_tx_rdy),
+        // sometimes we want to sychronize with the screen
+        .vbi(vbi),
 
         // debugging
         .dbg(play_dbg)
