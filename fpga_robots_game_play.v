@@ -62,7 +62,6 @@ module fpga_robots_game_play(
     parameter CMD_NEWGAME      = 4'd2; // start a new game
     parameter CMD_NEWLEVEL     = 4'd3; // start a level of the game
     parameter CMD_ENDLEVEL     = 4'd4; // end a level of the game
-    parameter CMD_TRASH        = 4'd6; // fill play area with garbagea
     parameter CMD_BOOT         = 4'd7; // start-up time
     parameter CMD_MV_ZEROTOP   = 4'd8; // zero the upper half bytes
     parameter CMD_MV_DOMOVE    = 4'd9; // do a single move, into upper halves
@@ -330,10 +329,6 @@ module fpga_robots_game_play(
         (sml_x == player_x) && // right cell horizontally
         (sml_y == player_y[6:1]); // right *pair* of cells vertically
 
-    // Logic for getting the player's attention
-    reg want_attention_f2;
-    assign want_attention = want_attention_f2; // XXX add more
-
     // Logic for data dump over the serial port
     reg dump_going;
     wire dump_suspend = !ser_tx_rdy;
@@ -381,8 +376,14 @@ module fpga_robots_game_play(
     //      move_player_{x,y} - cell coordinates player is moving to
     //      moving_{n,s,e,w} - 1 or 2 of these high to indicate direction
     //                         of current move command
-    reg [6:0]move_player_x = 7'd0; // XXX set this for real
-    reg [6:0]move_player_y = 7'd0; // XXX set this for real
+    //      is_dead - game over, player died, can't move
+    //      move_continues - a successful move will repeat
+    //      move_kills - a failed move will kill the player
+    wire [6:0]move_player_x = player_x; // XXX set this for real & make it reg
+    wire [6:0]move_player_y = player_y; // XXX set this for real & make it reg
+    reg is_dead = 1'd0; // XXX set this for real
+    reg move_continues = 1'd0; // XXX set this for real
+    reg move_kills = 1'd0; // XXX set this for real
     reg moving_n = 1'd0;
     reg moving_s = 1'd0;
     reg moving_e = 1'd0;
@@ -406,6 +407,8 @@ module fpga_robots_game_play(
     //      move_to_adr - address of the cell it'd move *to*
     //      move_to_half - cell in upper (0) or lower (1) half of the byte?
     //      move_result - byte to write to that address
+    //      move_kill_robots - 0-2 points, to add to score in this move
+    //      move_kill_player - whether this move kills the player
     wire [3:0]move_red = sml_ph1 ? tm_red : move_red_save;
     reg [3:0]move_red_save = 4'd0;
     always @(posedge clk) move_red_save <= rst ? 4'd0 : move_red;
@@ -420,8 +423,9 @@ module fpga_robots_game_play(
     always @* begin
         move_to_x_delta = 7'd0;
         move_to_y_delta = 7'd0;
-        if (move_what == PAC_ROBOT) begin
+        if (move_what == PAC_ROBOT || move_what == PAC_PLAYER) begin
             // robot can move; figure out direction in X & Y dimensions
+            // player can move too
             if (move_player_x < move_from_where_x) begin
                 // leftward
                 move_to_x_delta = 7'd127;
@@ -443,14 +447,90 @@ module fpga_robots_game_play(
     wire [12:0]move_to_adr = { move_to_y[6:1], move_to_x[6:0] };
     wire move_to_half = move_to_y[0];
 
+    // generate move_result, which is the byte which will be written back.
+    // This depends on what's moving, where it's moving to, and what's
+    // already moved there.  Even things that don't move - trash - are
+    // still "moved" in the sense that they're put somewhere by the
+    // computation.  It just always happends to be, where they already were.
     reg [7:0]move_result;
+    wire [1:0]move_obstruction; // what was already there
+    reg [1:0]move_kill_robots;
+    reg move_kill_player;
+    reg [1:0]move_combined; // combination of move_what & move_obstruction
+
+    assign move_obstruction = move_to_half ? tm_red[3:2] : tm_red[1:0];
+
+    always @* begin
+        move_kill_robots = 2'd0; // no points unless determined otherwise
+        move_kill_player = 1'd0; // survive unless determined otherwise
+
+        case (move_what)
+        PAC_EMPTY:
+            // Nothing is being moved.
+            move_combined = move_obstruction;
+        PAC_ROBOT:
+            // Robot is being moved.
+            case (move_obstruction)
+            PAC_EMPTY:
+                // Robot safely moves.
+                move_combined = PAC_ROBOT;
+            PAC_ROBOT: begin
+                // Two robots collide
+                move_combined = PAC_TRASH;
+                move_kill_robots = 2'd2;
+            end
+            PAC_TRASH: begin
+                // One robot collides with trash
+                move_combined = PAC_TRASH;
+                move_kill_robots = 2'd1;
+            end
+            PAC_PLAYER: begin
+                // Robot kills the player
+                move_combined = PAC_ROBOT;
+                move_kill_player = 1'd1;
+            end
+            endcase
+        PAC_TRASH:
+            // Trash is being "moved".  Since it never goes anywhere,
+            // move_obstruction == PAC_TRASH too.
+            move_combined = PAC_TRASH;
+        PAC_PLAYER:
+            // Player is being moved.
+            case (move_obstruction)
+            PAC_EMPTY:
+                // Player safely moves.
+                move_combined = PAC_PLAYER;
+            PAC_ROBOT: begin
+                // Player hits robot
+                move_combined = PAC_ROBOT;
+                move_kill_player = 1'd1;
+            end
+            PAC_TRASH: begin
+                // Player hits trash.  Really this never happens, but
+                // if it does, player dies; which is used to prevent
+                // it from happening.
+                move_combined = PAC_TRASH;
+                move_kill_player = 1'd1;
+            end
+            PAC_PLAYER:
+                // Shouldn't happen (shouldn't have two players to move)
+                // but it's harmless if it does.
+                move_combined = PAC_PLAYER;
+            endcase
+        endcase
+    end
+
     always @* begin
         move_result = tm_red;
-        // XXX actually set move_result
+        if (move_to_half)
+            move_result[3:2] = move_combined;
+        else
+            move_result[1:0] = move_combined;
     end
 
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
+    reg want_attention_f2;
     always @* begin
         tm_adr = 13'd0;
         tm_wrt = 8'd0;
@@ -474,10 +554,9 @@ module fpga_robots_game_play(
         CMD_IDLE: begin
             // This is where we handle commands received from 'cmd' and
             // processed through 'cmd_*'
-            if (cmd_fns[2]) begin // F3: trash; increment score
+            if (cmd_fns[2]) begin // F3: starts some parts of a "move"
                 cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
-                sk_score_inc = 1'd1;
-                sml_opcode_next = CMD_TRASH;
+                sml_opcode_next = CMD_MV_ZEROTOP;
             end else if (cmd_fns[0]) begin // F1: new level
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
                 sk_level_inc = 1'd1;
@@ -563,24 +642,6 @@ module fpga_robots_game_play(
         CMD_ENDLEVEL: begin
             // XXX
         end
-        CMD_TRASH: begin
-            // "Trash" command: fill play area with garbage, for testing
-            // and debugging.
-            if (sml_rgt) begin
-                // score update
-                skw_didread = sml_ph1;
-                tm_adr = sml_adr;
-                tm_wen = skw_wen;
-                tm_wrt = skw_wrt;
-            end else begin
-                if (sml_ph0) begin
-                    // garbage from the PRNG
-                    tm_wen = 1'd1;
-                    tm_adr = sml_adr;
-                    tm_wrt = prng[7:0];
-                end
-            end
-        end
         CMD_BOOT: begin
             // At reset or startup: start a new game
             score_reset = 1'd1; // reset score & level (but not high)
@@ -627,7 +688,7 @@ module fpga_robots_game_play(
             end
             tm_wen = (sml_ph2 || sml_ph4); // these operations perform write
             tm_wrt = move_result; // only matters in ph2 & ph4
-            // XXX handle successor opcode
+            sml_opcode_next = CMD_MV_COPYDOWN; // XXX do for real
             // XXX handle score keeping
             // XXX handle failure
         end
@@ -651,4 +712,8 @@ module fpga_robots_game_play(
         end
         endcase
     end
+
+    // Logic for getting the player's attention
+    assign want_attention = want_attention_f2; // XXX add more
+
 endmodule
