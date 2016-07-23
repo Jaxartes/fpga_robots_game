@@ -9,18 +9,21 @@ if {[lindex $argv 0] eq "verbose"} {
     set verbose 1
 }
 
-# Table of what keys have meaning.
+# Table of what keys have what meanings.
 # format: label-list flag-list
+# flag-list consists of one or more names, defined below in flag_codes().
+# The name is because at one time they were all single bits.  Not any more,
+# but the name sticks.
 set meanings {
-    {"Y" "KP 7"}           {turn nw}
-    {"K" "KP 8" "U ARROW"} {turn n}
-    {"U" "KP 9"}           {turn ne}
-    {"H" "KP 4" "L ARROW"} {turn w}
-    {"." "KP 5" "KP ."}    {turn}
-    {"L" "KP 6" "R ARROW"} {turn e}
-    {"B" "KP 1"}           {turn sw}
-    {"J" "KP 2" "D ARROW"} {turn s}
-    {"N" "KP 3"}           {turn se}
+    {"Y" "KP 7"}           nw
+    {"K" "KP 8" "U ARROW"} n
+    {"U" "KP 9"}           ne
+    {"H" "KP 4" "L ARROW"} w
+    {"." "KP 5" "KP ."}    stay
+    {"L" "KP 6" "R ARROW"} e
+    {"B" "KP 1"}           sw
+    {"J" "KP 2" "D ARROW"} s
+    {"N" "KP 3"}           se
     {"W" "KP 0"}           wait
     {"T" "KP *"}           teleport
     {"Q" "ESC" "BKSP"}     quit
@@ -34,7 +37,7 @@ set meanings {
     "F3"                   fn3
 }
 
-# and what bit field encodes each flag
+# and what the named "flags" above are encoded as numerically
 array set flag_codes {
     modifier 0x8000
     teleport 0x4000
@@ -44,14 +47,15 @@ array set flag_codes {
     fn3      0x0400
     fn2      0x0200
     fn1      0x0100
-        e      0x80
-        se     0x40
-        s      0x20
-        sw     0x10
-        w      0x08
-        nw     0x04
-        n      0x02
-        ne     0x01
+        e       16
+        se      17
+        s       18
+        sw      19
+        w       20
+        nw      21
+        n       22
+        ne      23
+        stay    24
 }
 
 # Keyboard scan code data, adapted from

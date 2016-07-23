@@ -75,16 +75,12 @@ module fpga_robots_game_play(
     parameter PAC_TRASH  = 2'd2;
     parameter PAC_PLAYER = 2'd3;
 
-    // Handling commands which come in through 'cmd'
-    reg [7:0]cmd_smove = 8'd0; // single moves pending: E SE S SW W NW N NE
-    reg [7:0]cmd_rmove = 8'd0; // repeated moves pending
-    wire [7:0]cmd_smove_clr; // will pulse when one of these is done
-    wire [7:0]cmd_rmove_clr; // will pulse when one of these is done
+    // Handling commands which come in through 'cmd', which are one bit
+    // each, except some of the moves which are kept separately.
     reg cmd_tele = 1'd0; // teleport command
     reg cmd_wait = 1'd0; // wait command
-    reg cmd_turn = 1'd0; // waste turn command
     reg cmd_quit = 1'd0; // quit command
-    reg cmd_tele_clr, cmd_wait_clr, cmd_turn_clr, cmd_quit_clr;
+    reg cmd_tele_clr, cmd_wait_clr, cmd_quit_clr;
     reg [2:0]cmd_fns = 3'd0; // F1, F2, F3 keys do "special" things
     reg [2:0]cmd_fns_clr;
     reg cmd_dump_pending = 1'd0; // a 'dump' has been requested
@@ -92,19 +88,12 @@ module fpga_robots_game_play(
 
     always @(posedge clk)
         if (rst) begin
-            cmd_smove <= 8'd0;
-            cmd_rmove <= 8'd0;
-            { cmd_tele, cmd_wait, cmd_turn, cmd_quit } <= 4'd0;
+            { cmd_tele, cmd_wait, cmd_quit } <= 4'd0;
             cmd_fns <= 3'd0;
             cmd_dump_pending <= 1'd0;
         end else begin
-            cmd_smove <= (cmd_smove & ~cmd_smove_clr) |
-                         (cmd[15] ? 8'd0 : cmd[7:0]);
-            cmd_rmove <= (cmd_rmove & ~cmd_rmove_clr) |
-                         (cmd[15] ? cmd[7:0] : 8'd0);
             cmd_tele <= (cmd_tele & ~cmd_tele_clr) | cmd[14];
             cmd_wait <= (cmd_wait & ~cmd_wait_clr) | cmd[13];
-            cmd_turn <= (cmd_turn & ~cmd_turn_clr) | cmd[12];
             cmd_quit <= (cmd_quit & ~cmd_quit_clr) | cmd[11];
             cmd_fns <= (cmd_fns & ~cmd_fns_clr) | cmd[10:8];
             cmd_dump_pending <= (cmd_dump_pending & ~cmd_dump_clr) |
@@ -542,7 +531,6 @@ module fpga_robots_game_play(
         cmd_fns_clr = 3'd0;
         cmd_tele_clr = 1'd0;
         cmd_wait_clr = 1'd0;
-        cmd_turn_clr = 1'd0;
         cmd_quit_clr = 1'd0;
         cmd_dump_clr = 1'd0;
         skw_didread = 1'd0;
