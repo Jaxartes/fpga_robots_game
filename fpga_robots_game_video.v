@@ -145,7 +145,7 @@ module fpga_robots_game_video(
         end
 
     // vertical blank signal for memory access control
-    wire vbi = (s1_y[9:8] == 2'd3); // Y >= 768
+    assign vbi = (s1_y[9:8] == 2'd3); // Y >= 768
 
 `ifdef FPGA_ROBOTS_ANIMATE
     // // // //

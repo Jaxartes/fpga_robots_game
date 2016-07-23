@@ -56,6 +56,8 @@ module fpga_robots_game_play(
     // And the "CMD_DUMP" opcode requires a wait between bytes of output
     // so that the serial port can keep up.
 
+    parameter WAIT_FOR_VBI = 1'd1; // prettier but slow
+
     // The "opcodes" form a state machine; here they are:
     parameter CMD_IDLE         = 4'd0; // wait for a command & perform it
     parameter CMD_DUMP         = 4'd1; // dump game state to serial port
@@ -458,7 +460,7 @@ module fpga_robots_game_play(
     reg move_kill_player;
     reg [1:0]move_combined; // combination of move_what & move_obstruction
 
-    assign move_obstruction = move_to_half ? tm_red[3:2] : tm_red[1:0];
+    assign move_obstruction = move_to_half ? tm_red[7:6] : tm_red[5:4];
 
     always @* begin
         move_kill_robots = 2'd0; // no points unless determined otherwise
@@ -523,9 +525,9 @@ module fpga_robots_game_play(
     always @* begin
         move_result = tm_red;
         if (move_to_half)
-            move_result[3:2] = move_combined;
+            move_result[7:6] = move_combined;
         else
-            move_result[1:0] = move_combined;
+            move_result[5:4] = move_combined;
     end
 
     // Handle the "opcodes" of the state machine loop, especially
@@ -681,12 +683,11 @@ module fpga_robots_game_play(
             if (sml_ph0) begin
                 // ph0 - reads the byte to move from
                 tm_adr = sml_adr;
-            end
-            if (sml_ph1 || sml_ph2 || sml_ph3 || sml_ph4) begin
+            end else begin
                 // ph1-ph4 - operations on the "move to" address
                 tm_adr = move_to_adr;
             end
-            tm_wen = (sml_ph2 || sml_ph4); // these operations perform write
+            tm_wen = (sml_ph2 || sml_ph4) && !sml_rgt;
             tm_wrt = move_result; // only matters in ph2 & ph4
             sml_opcode_next = CMD_MV_COPYDOWN; // XXX do for real
             // XXX handle score keeping
@@ -699,11 +700,11 @@ module fpga_robots_game_play(
 
             // Halt operation until we're in the vertical blanking interval,
             // for the best looking results
-            sml_suspend = !vbi;
+            sml_suspend = WAIT_FOR_VBI && !vbi;
 
             // Do the copy, by reading at ph0 & writing back at ph1.
             tm_adr = sml_adr;
-            tm_wen = sml_ph1 && !sml_rgt;
+            tm_wen = sml_ph1 && !sml_rgt && (vbi || !WAIT_FOR_VBI);
             tm_wrt = { 4'd0, tm_red[7:4] };
 
             // When this is done, go back to CMD_IDLE which gets to decide
