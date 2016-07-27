@@ -53,21 +53,21 @@ module fpga_robots_game_play(
 
     // The one other thing it can do is wait.  Some opcodes require a wait
     // for the vertical blanking interval before starting their cycle.
-    // And the "CMD_DUMP" opcode requires a wait between bytes of output
+    // And the "OPC_DUMP" opcode requires a wait between bytes of output
     // so that the serial port can keep up.
 
     parameter WAIT_FOR_VBI = 1'd1; // prettier but slow
 
     // The "opcodes" form a state machine; here they are:
-    parameter CMD_IDLE         = 4'd0; // wait for a command & perform it
-    parameter CMD_DUMP         = 4'd1; // dump game state to serial port
-    parameter CMD_NEWGAME      = 4'd2; // start a new game
-    parameter CMD_NEWLEVEL     = 4'd3; // start a level of the game
-    parameter CMD_ENDLEVEL     = 4'd4; // end a level of the game
-    parameter CMD_BOOT         = 4'd7; // start-up time
-    parameter CMD_MV_ZEROTOP   = 4'd8; // zero the upper half bytes
-    parameter CMD_MV_DOMOVE    = 4'd9; // do a single move, into upper halves
-    parameter CMD_MV_COPYDOWN  = 4'd10; // copy move results from upper halves
+    parameter OPC_IDLE         = 4'd0; // wait for a command & perform it
+    parameter OPC_DUMP         = 4'd1; // dump game state to serial port
+    parameter OPC_NEWGAME      = 4'd2; // start a new game
+    parameter OPC_NEWLEVEL     = 4'd3; // start a level of the game
+    parameter OPC_ENDLEVEL     = 4'd4; // end a level of the game
+    parameter OPC_BOOT         = 4'd7; // start-up time
+    parameter OPC_MV_ZEROTOP   = 4'd8; // zero the upper half bytes
+    parameter OPC_MV_DOMOVE    = 4'd9; // do a single move, into upper halves
+    parameter OPC_MV_COPYDOWN  = 4'd10; // copy move results from upper halves
 
     // things that go in the play area
     parameter PAC_EMPTY  = 2'd0;
@@ -77,10 +77,8 @@ module fpga_robots_game_play(
 
     // Handling commands which come in through 'cmd', which are one bit
     // each, except some of the moves which are kept separately.
-    reg cmd_tele = 1'd0; // teleport command
-    reg cmd_wait = 1'd0; // wait command
     reg cmd_quit = 1'd0; // quit command
-    reg cmd_tele_clr, cmd_wait_clr, cmd_quit_clr;
+    reg cmd_quit_clr;
     reg [2:0]cmd_fns = 3'd0; // F1, F2, F3 keys do "special" things
     reg [2:0]cmd_fns_clr;
     reg cmd_dump_pending = 1'd0; // a 'dump' has been requested
@@ -88,12 +86,10 @@ module fpga_robots_game_play(
 
     always @(posedge clk)
         if (rst) begin
-            { cmd_tele, cmd_wait, cmd_quit } <= 4'd0;
+            cmd_quit <= 4'd0;
             cmd_fns <= 3'd0;
             cmd_dump_pending <= 1'd0;
         end else begin
-            cmd_tele <= (cmd_tele & ~cmd_tele_clr) | cmd[14];
-            cmd_wait <= (cmd_wait & ~cmd_wait_clr) | cmd[13];
             cmd_quit <= (cmd_quit & ~cmd_quit_clr) | cmd[11];
             cmd_fns <= (cmd_fns & ~cmd_fns_clr) | cmd[10:8];
             cmd_dump_pending <= (cmd_dump_pending & ~cmd_dump_clr) |
@@ -113,7 +109,7 @@ module fpga_robots_game_play(
     wire [15:0]prng = prng_st[15:0];
 
     // Core state machine "loop"
-    reg [3:0]sml_opcode = CMD_BOOT; // "opcode" running now
+    reg [3:0]sml_opcode = OPC_BOOT; // "opcode" running now
     reg [6:0]sml_x = 7'd127; // X coordinate in cells, 0-127
     reg [5:0]sml_y = 6'd47; // Y coordinate in pairs of cells, 0-47
         // note: sml_x, sml_y are the current place in the scan,
@@ -126,7 +122,7 @@ module fpga_robots_game_play(
     reg sml_suspend; // halt the loop waiting for something
     always @(posedge clk)
         if (rst) begin
-            sml_opcode <= CMD_BOOT;
+            sml_opcode <= OPC_BOOT;
             sml_x <= 7'd127;
             sml_x_max <= 1'd1;
             sml_y <= 6'd47;
@@ -134,7 +130,7 @@ module fpga_robots_game_play(
             sml_ph <= 3'd0;
         end else if (sml_suspend) begin
             // nothing happening, we're just waiting
-        end else if (sml_opcode == CMD_IDLE) begin
+        end else if (sml_opcode == OPC_IDLE) begin
             // idle, so can switch states any time
             sml_opcode <= sml_opcode_next;
         end else if (sml_ph != 3'd4) begin
@@ -362,34 +358,66 @@ module fpga_robots_game_play(
         end
     end
 
-    // Logic for handling player move commands; see CMD_MV_* below.
-    // Major signals:
-    //      move_player_{x,y} - cell coordinates player is moving to
-    //      moving_{n,s,e,w} - 1 or 2 of these high to indicate direction
-    //                         of current move command
-    //      is_dead - game over, player died, can't move
-    //      move_continues - a successful move will repeat
-    //      move_kills - a failed move will kill the player
-    wire [6:0]move_player_x = player_x; // XXX set this for real & make it reg
-    wire [6:0]move_player_y = player_y; // XXX set this for real & make it reg
-    reg is_dead = 1'd0; // XXX set this for real
-    reg move_continues = 1'd0; // XXX set this for real
-    reg move_kills = 1'd0; // XXX set this for real
-    reg moving_n = 1'd0;
-    reg moving_s = 1'd0;
-    reg moving_e = 1'd0;
-    reg moving_w = 1'd0;
+    // In-progress and in-future move commands.
+    // Main state variables:
+    //      mcmd_pending - indicates what command is pending if any
+    //      mcmd_modified - indicates command has modifier set, which
+    //          when applied to the directional and "stay" commands,
+    //          results in them continuing as long as they safely can
+    // Input & control signals:
+    //      mcmd_clear_pending - clear the pending command
+    // Output signals:
+    //      mcmd_pending_any - any command is pending
+    //      move_player_{x,y} - where the player is moving to during a move
+    // Constants:
+    //      MCMD_* - codes defining the particular commands; see also
+    //          key_table_gen.tcl.  The choice of these values isn't
+    //          arbitrary; some patterns:
+    //              . all non-MCMD_NONE values have their [4] bit set
+    //              . all directional values are in the range 16-23
+    parameter MCMD_NONE = 5'd0;
+    parameter MCMD_E    = 5'd16;
+    parameter MCMD_SE   = 5'd17;
+    parameter MCMD_S    = 5'd18;
+    parameter MCMD_SW   = 5'd19;
+    parameter MCMD_W    = 5'd20;
+    parameter MCMD_NW   = 5'd21;
+    parameter MCMD_N    = 5'd22;
+    parameter MCMD_NE   = 5'd23;
+    parameter MCMD_STAY = 5'd24;
+    parameter MCMD_WAIT = 5'd25;
+    parameter MCMD_TELE = 5'd26;
+    reg [4:0]mcmd_pending = MCMD_NONE;
+    reg mcmd_modified = 1'd0;
+    reg mcmd_clear_pending;
+
+    wire mcmd_pending_any = mcmd_pending[4];
+    wire cmd_any = cmd[4];
+    wire cmd_modified = cmd[15];
+
     always @(posedge clk)
         if (rst) begin
-            { moving_n, moving_s, moving_e, moving_w } <= 4'd0;
-        end else begin
-            // XXX generate moving_*
+            // reset: don't have any commands pending
+            mcmd_pending <= MCMD_NONE;
+            mcmd_modified <= 1'd0;
+        end else if (cmd_any && !mcmd_pending_any) begin
+            // If no command was pending and a new command comes in, record
+            // it.  (If a command comes in while another was pending, ignore
+            // it.)
+            mcmd_pending <= cmd[4:0];
+            mcmd_modified <= cmd_modified;
+        end else if (mcmd_clear_pending) begin
+            // we've been signalled to clear the pending command, it's done
+            mcmd_pending <= MCMD_NONE;
+            mcmd_modified <= 1'd0;
         end
+    // XXX there's a lot more to be done here
 
-    // XXX there's more to be added here
+    wire [6:0]move_player_x = player_x; // XXX set this for real & make it reg
+    wire [6:0]move_player_y = player_y; // XXX set this for real & make it reg
 
     // Logic for moving the playing field elements (esp robots) when the
-    // player moves; see CMD_MV_DOMOVE below.
+    // player moves; see OPC_MV_DOMOVE below.
     // Major signals:
     //      move_red - low (visible) half of byte that was read in ph0 that
     //          contains the elements being moved
@@ -526,11 +554,9 @@ module fpga_robots_game_play(
         tm_adr = 13'd0;
         tm_wrt = 8'd0;
         tm_wen = 1'd0;
-        sml_opcode_next = CMD_IDLE;
+        sml_opcode_next = OPC_IDLE;
         sml_suspend = 1'd0;
         cmd_fns_clr = 3'd0;
-        cmd_tele_clr = 1'd0;
-        cmd_wait_clr = 1'd0;
         cmd_quit_clr = 1'd0;
         cmd_dump_clr = 1'd0;
         skw_didread = 1'd0;
@@ -539,44 +565,51 @@ module fpga_robots_game_play(
         score_reset = 1'd0;
         want_attention_f2 = 1'd0;
         dump_going = 1'd0;
+        mcmd_clear_pending = 1'd0;
 
         case(sml_opcode)
-        CMD_IDLE: begin
+        OPC_IDLE: begin
             // This is where we handle commands received from 'cmd' and
-            // processed through 'cmd_*'
+            // processed through 'cmd_*'.  Move commands are processed
+            // through an intermediate layer before coming here, see 'mcmd'.
+
             if (cmd_fns[2]) begin // F3: starts some parts of a "move"
                 cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
-                sml_opcode_next = CMD_MV_ZEROTOP;
+                sml_opcode_next = OPC_MV_ZEROTOP;
             end else if (cmd_fns[0]) begin // F1: new level
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
                 sk_level_inc = 1'd1;
-                sml_opcode_next = CMD_NEWLEVEL;
+                sml_opcode_next = OPC_NEWLEVEL;
             end else if (cmd_fns[1]) begin // F2: beep
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
                 want_attention_f2 = 1'd1; // signal for a beep
             end else if (cmd_quit) begin // q/esc/bs: new game
                 cmd_quit_clr = 1'd1;
                 score_reset = 1'd1; // reset score & level (but not high)
-                sml_opcode_next = CMD_NEWGAME; // and fill in the level
+                sml_opcode_next = OPC_NEWGAME; // and fill in the level
             end else if (cmd_dump_pending) begin // data dump over serial port
                 cmd_dump_clr = 1'd1;
-                sml_opcode_next = CMD_DUMP;
+                sml_opcode_next = OPC_DUMP;
+            end else if (mcmd_pending_any) begin // command to move player
+                // XXX this is just dummy code and doesn't do the whole thing,
+                // for now it just does a dummy move like F3
+                sml_opcode_next = OPC_MV_ZEROTOP;
             end
             // XXX handle all the commands here
         end
-        CMD_NEWGAME : begin
+        OPC_NEWGAME : begin
             // Begin a new game.  This begins the first level of the game.
             // Hardly anything is done in this opcode, even though we give
-            // it plenty of time.  Much is done in CMD_IDLE (before
-            // CMD_NEWGAME) and the rest in CMD_NEWLEVEL (after CMD_NEWGAME).
+            // it plenty of time.  Much is done in OPC_IDLE (before
+            // OPC_NEWGAME) and the rest in OPC_NEWLEVEL (after OPC_NEWGAME).
             // The one thing that doesn't fit between is pulsing sk_level_inc,
             // because it can't happen at the same time as score_reset.
 
             // pulse sk_level_inc once, during the entire time this opcode runs.
             sk_level_inc = sml_single;
-            sml_opcode_next = CMD_NEWLEVEL;
+            sml_opcode_next = OPC_NEWLEVEL;
         end
-        CMD_NEWLEVEL: begin
+        OPC_NEWLEVEL: begin
             // Begin a new level (possibly a new game).  Does the following:
             //      + clears existing play field
             //      + fills in new robots
@@ -622,22 +655,22 @@ module fpga_robots_game_play(
                     tm_wrt[1:0] = PAC_EMPTY;
                 end
         end
-        CMD_DUMP: begin
+        OPC_DUMP: begin
             // Dump: Dump the data in the tile map memory over the serial
             // port.
             dump_going = 1'd1;
             tm_adr = sml_adr;
             sml_suspend = dump_suspend;
         end
-        CMD_ENDLEVEL: begin
+        OPC_ENDLEVEL: begin
             // XXX
         end
-        CMD_BOOT: begin
+        OPC_BOOT: begin
             // At reset or startup: start a new game
             score_reset = 1'd1; // reset score & level (but not high)
-            sml_opcode_next = CMD_NEWGAME; // and fill in the level
+            sml_opcode_next = OPC_NEWGAME; // and fill in the level
         end
-        CMD_MV_ZEROTOP: begin
+        OPC_MV_ZEROTOP: begin
             // As part of a move, zero the upper 4 bits of each byte in
             // the play area.
 
@@ -652,13 +685,13 @@ module fpga_robots_game_play(
             tm_wen = sml_ph1 && !sml_rgt;
             tm_wrt = { 4'd0, tm_red[3:0] };
 
-            // And the opcode CMD_MV_DOMOVE always follows it.
-            sml_opcode_next = CMD_MV_DOMOVE;
+            // And the opcode OPC_MV_DOMOVE always follows it.
+            sml_opcode_next = OPC_MV_DOMOVE;
         end
-        CMD_MV_DOMOVE: begin
+        OPC_MV_DOMOVE: begin
             // Do a move: Transferring playing field elements to their
             // new positions, in the upper (invisible) half of each byte
-            // of the playing area.  Later (in CMD_MV_COPYDOWN) this will
+            // of the playing area.  Later (in OPC_MV_COPYDOWN) this will
             // be copied into the lower (visible) halves of the bytes.
 
             // This opcode uses all five phases:
@@ -677,11 +710,11 @@ module fpga_robots_game_play(
             end
             tm_wen = (sml_ph2 || sml_ph4) && !sml_rgt;
             tm_wrt = move_result; // only matters in ph2 & ph4
-            sml_opcode_next = CMD_MV_COPYDOWN; // XXX do for real
+            sml_opcode_next = OPC_MV_COPYDOWN; // XXX do for real
             // XXX handle score keeping
             // XXX handle failure
         end
-        CMD_MV_COPYDOWN: begin
+        OPC_MV_COPYDOWN: begin
             // At the end of a successful move, copy from the upper half
             // bytes (which hold temporary results) to the lower half
             // (which hold displayed results).
@@ -695,9 +728,10 @@ module fpga_robots_game_play(
             tm_wen = sml_ph1 && !sml_rgt && (vbi || !WAIT_FOR_VBI);
             tm_wrt = { 4'd0, tm_red[7:4] };
 
-            // When this is done, go back to CMD_IDLE which gets to decide
+            // When this is done, go back to OPC_IDLE which gets to decide
             // what we'll be doing.
-            sml_opcode_next = CMD_IDLE;
+            sml_opcode_next = OPC_IDLE;
+            mcmd_clear_pending = 1'd1; // clear the command, it's served
         end
         endcase
     end

@@ -40,9 +40,6 @@ set meanings {
 # and what the named "flags" above are encoded as numerically
 array set flag_codes {
     modifier 0x8000
-    teleport 0x4000
-    wait     0x2000
-    turn     0x1000
     quit     0x0800
     fn3      0x0400
     fn2      0x0200
@@ -56,6 +53,8 @@ array set flag_codes {
         n       22
         ne      23
         stay    24
+        wait    25
+        teleport 26
 }
 
 # Keyboard scan code data, adapted from
