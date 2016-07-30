@@ -413,8 +413,57 @@ module fpga_robots_game_play(
         end
     // XXX there's a lot more to be done here
 
-    wire [6:0]move_player_x = player_x; // XXX set this for real & make it reg
-    wire [6:0]move_player_y = player_y; // XXX set this for real & make it reg
+    // Figure out some things about the move command mcmd_pending
+    //      move_player_{x,y} - where the player is moving to
+    //      mcmd_{n,s,e,w}ward - movement in a general direction
+    //      mcmd_dec_{stay,wait,tele} - indicates these three commands
+    //      move_oobounds - indicates move is out of bounds
+    reg [6:0]move_player_x;
+    reg [6:0]move_player_y;
+    reg move_oobounds;
+    reg mcmd_nward, mcmd_sward, mcmd_eward, mcmd_wward;
+    always @* begin
+        mcmd_nward = 1'd0;
+        mcmd_sward = 1'd0;
+        mcmd_eward = 1'd0;
+        mcmd_wward = 1'd0;
+        case (mcmd_pending)
+        MCMD_E: mcmd_eward = 1'd1;
+        MCMD_W: mcmd_wward = 1'd1;
+        MCMD_N: mcmd_nward = 1'd1;
+        MCMD_S: mcmd_sward = 1'd1;
+        MCMD_NE: { mcmd_nward, mcmd_eward } = 2'd3;
+        MCMD_NW: { mcmd_nward, mcmd_wward } = 2'd3;
+        MCMD_SE: { mcmd_sward, mcmd_eward } = 2'd3;
+        MCMD_SW: { mcmd_sward, mcmd_wward } = 2'd3;
+        endcase
+    end
+    wire mcmd_dec_stay = (mcmd_pending == MCMD_STAY);
+    wire mcmd_dec_wait = (mcmd_pending == MCMD_WAIT);
+    wire mcmd_dec_tele = (mcmd_pending == MCMD_TELE);
+
+    always @* begin
+        move_player_x = player_x;
+        move_player_y = player_y;
+        move_oobounds = 1'd0;
+        if (mcmd_eward) begin
+            move_player_x = player_x - 7'd1;
+            move_oobounds = (move_player_x == 7'd0);
+        end else if (mcmd_wward) begin
+            move_player_x = player_x + 7'd1;
+            move_oobounds = (move_player_x == 7'd127);
+        end else if (mcmd_dec_tele)
+            move_player_x = new_player_x;
+
+        if (mcmd_nward) begin
+            move_player_y = player_y - 7'd1;
+            move_oobounds = (move_player_y == 7'd0);
+        end else if (mcmd_sward) begin
+            move_player_y = player_y + 7'd1;
+            move_oobounds = (move_player_y == 7'd95);
+        end else if (mcmd_dec_tele)
+            move_player_y = new_player_y;
+    end
 
     // Logic for moving the playing field elements (esp robots) when the
     // player moves; see OPC_MV_DOMOVE below.
