@@ -35,11 +35,13 @@ set meanings {
     "F1"                   fn1
     "F2"                   fn2
     "F3"                   fn3
+    "SCROLL"               scroll_for_reset
 }
 
 # and what the named "flags" above are encoded as numerically
 array set flag_codes {
     modifier 0x8000
+    scroll_for_reset 0x4000
     quit     0x0800
     fn3      0x0400
     fn2      0x0200

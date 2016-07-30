@@ -58,7 +58,7 @@ foreach {keysym sticky kcext kcbyte altkeysym} {
     Super_R    1 1 0x27 ""
     t          0 0 0x2c T
     q          0 0 0x15 Q
-    w          0 0 0x22 W
+    w          0 0 0x1d W
     F1         0 0 0x05 ""
     F2         0 0 0x06 ""
     F3         0 0 0x04 ""

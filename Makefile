@@ -8,6 +8,7 @@ VERILOG= \
     misc.v \
     fpga_robots_game_config.v \
     serial_port.v \
+    ps2.v \
     fpga_robots_game_play.v \
     fpga_robots_game_control.v
 

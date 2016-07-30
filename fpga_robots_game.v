@@ -44,13 +44,15 @@ module fpga_robots_game(
     );
 
     // Reset.  Driven by the reset button and the clock's "LOCKED" signal.
+    // Or by the shift-scroll key combination (twice).
     reg rst2 = 1'd1, rst3 = 1'd1, rst4 = 1'd1;
     reg [3:0] rstctr = 4'd0;
+    wire ctl_driven_reset;
     always @(posedge clk) begin
         // synchronize the incoming reset button signal
         { rst3, rst4 } <= { rst4, i_reset };
-        // count how long it's been sinvce the button went up
-        if (rst3 || ~clklck) begin
+        // count how long it's been since the button went up
+        if (rst3 || ~clklck || ctl_driven_reset) begin
             rstctr <= 4'd0;
             rst2 <= 1'd1;
         end else if (rstctr != 4'd15) begin
@@ -151,6 +153,25 @@ module fpga_robots_game(
     assign o_audio_l = audio;
     assign o_audio_r = audio;
 
+    // Decide when to reset the keyboard.  I'm tempted to do that every
+    // time the player executes a 'quit' command but for now I won't.
+    // Just reset the keyboard shortly after the system comes out of
+    // reset.  How long is "shortly"?  Let's say ~1/5 second, counted
+    // by video frames.
+    reg [3:0]kbdrstctr = 4'd0;
+    reg ps2_tx_reset = 1'd0;
+    always @(posedge clk)
+        if (rst) begin
+            kbdrstctr <= 4'd12; // 12 frames at 60 frames per second
+            ps2_tx_reset <= 1'd0;
+        end else begin
+            ps2_tx_reset <= 1'd0;
+            if ((|kbdrstctr) && framepulse) begin
+                if (kbdrstctr == 4'd1) ps2_tx_reset <= 1'd1;
+                kbdrstctr <= kbdrstctr - 4'd1;
+            end
+        end
+
     // Serial port
     wire [7:0]ser_rx_dat;
     wire [7:0]ser_tx_dat;
@@ -169,6 +190,20 @@ module fpga_robots_game(
         .tx_dat(ser_tx_dat), .tx_stb(ser_tx_stb), .tx_rdy(ser_tx_rdy)
     );
 
+    // PS/2 port
+    wire [7:0]ps2_rx_dat;
+    wire ps2_rx_stb;
+    ps2 ps2(
+        // general system stuff
+        .clk(clk), .rst(rst),
+        // the external PS/2 port
+        .ps2clk(ps2a_clk), .ps2dat(ps2a_dat),
+        // system interface
+        .sixus(sixus),
+        .ps2_rx_dat(ps2_rx_dat), .ps2_rx_stb(ps2_rx_stb),
+        .ps2_tx_reset(ps2_tx_reset)
+    );
+
     // Control interface: Receives signals from serial port & from PS/2
     // keyboard.
     wire [15:0]ctl_cmd;
@@ -177,8 +212,8 @@ module fpga_robots_game(
     fpga_robots_game_control ctl(
         // general system stuff
         .clk(clk), .rst(rst),
-        // PS/2 port: for now just a dummy, to be done later XXX
-        .ps2_rx_dat(8'd0), .ps2_rx_stb(1'd0),
+        // PS/2 port: get commands from keyboard
+        .ps2_rx_dat(ps2_rx_dat), .ps2_rx_stb(ps2_rx_stb),
         // Serial port: another way to get commands
         .ser_rx_dat(ser_rx_dat),
         .ser_rx_stb(ser_rx_stb),
@@ -190,6 +225,22 @@ module fpga_robots_game(
         // debugging
         .dbg(ctl_dbg)
     );
+
+    // And the keyboard, in turn, can produce a reset.
+    wire ctl_driven_reset_key = ctl_cmd[14]; // scroll lock
+    wire ctl_driven_reset_mod = ctl_cmd[15]; // shift or other modifier
+    reg ctl_driven_reset_seen = 1'd0; // have we gotten it once already?
+    reg ctl_driven_reset_r = 1'd0;
+    assign ctl_driven_reset = ctl_driven_reset_r;
+    always @(posedge clk)
+        if (rst) begin
+            ctl_driven_reset_seen <= 1'd0;
+            ctl_driven_reset_r <= 1'd0;
+        end else if (ctl_driven_reset_key && ctl_driven_reset_mod) begin
+            if (ctl_driven_reset_seen) // shift-scroll twice
+                ctl_driven_reset_r <= 1'd1;
+            ctl_driven_reset_seen <= 1'd1;
+        end
 
     // Game play logic.
     wire play_dbg;

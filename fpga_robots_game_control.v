@@ -5,8 +5,6 @@
 // keyboard (over the PS/2 interface) or from the host (over the serial
 // port) and generates command bits for the game
 
-// XXX this may be tricky enough to need a test in the simulator
-
 `include "fpga_robots_game_config.v"
 
 module fpga_robots_game_control(
@@ -15,7 +13,6 @@ module fpga_robots_game_control(
     input rst, // reset: active high, synchronous
 
     // received data from PS/2 port
-    // XXX hook this up
     input [7:0]ps2_rx_dat, // data
     input      ps2_rx_stb, // strobe: will pulse when data is new & valid
 
@@ -118,8 +115,7 @@ module fpga_robots_game_control(
     reg kdec_ext = 1'd0; // extended keycode with 0xe0
     reg kdec_brk = 1'd0; // "break" keycode with 0xf0
     reg kdec_stb = 1'd0; // indicates key_table_dat is "interesting"
-    wire ps2_kc_dat = 1'd0; // XXX temporary dummy
-    wire [7:0]kdec_in = ser_kc_stb ? ser_kc_dat : ps2_kc_dat;
+    wire [7:0]kdec_in = ser_kc_stb ? ser_kc_dat : ps2_rx_dat;
     assign key_table_adr = { kdec_ext, kdec_in };
 
     always @(posedge clk)
@@ -146,7 +142,7 @@ module fpga_robots_game_control(
             end
         end
 
-    wire kdec_modmask = 16'd8000; // which command bits are modifier keys?
+    wire [15:0]kdec_modmask = 16'h8000; // which command bits are modifier keys?
     reg kdec_brk_d1 = 1'd0;
     always @(posedge clk) kdec_brk_d1 <= rst ? 1'd0 : kdec_brk;
     always @(posedge clk)
