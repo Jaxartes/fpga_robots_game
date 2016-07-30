@@ -446,10 +446,10 @@ module fpga_robots_game_play(
         move_player_x = player_x;
         move_player_y = player_y;
         move_oobounds = 1'd0;
-        if (mcmd_eward) begin
+        if (mcmd_wward) begin
             move_player_x = player_x - 7'd1;
             move_oobounds = (move_player_x == 7'd0);
-        end else if (mcmd_wward) begin
+        end else if (mcmd_eward) begin
             move_player_x = player_x + 7'd1;
             move_oobounds = (move_player_x == 7'd127);
         end else if (mcmd_dec_tele)
