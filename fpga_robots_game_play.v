@@ -189,7 +189,7 @@ module fpga_robots_game_play(
     wire [23:0]sk_high; // 6-digit high score
     wire [5:0]sk_score_mask; // hide digits
     wire [5:0]sk_high_mask;
-    reg sk_score_inc; // pulse to increment
+    wire sk_score_inc; // pulse to increment
     digit6 sk_score_digit6(
         .clk(clk), .rst(rst || score_reset),
         .data(sk_score), .mask(sk_score_mask), .inc(sk_score_inc)
@@ -203,6 +203,24 @@ module fpga_robots_game_play(
         // copying one.
         .inc(sk_score_inc && (sk_score == sk_high))
     );
+
+    // Allow several to be added, one per clock cycle.
+    // Assumes either sk_score_add or sk_score_acc is always zero, and
+    // that no backlog accumulates.  These assumptions are borne up by
+    // the way it's used here:  Up to four points (two robots times two
+    // points each) in a five clock period.
+    //      Input: sk_score_add, points to add
+    //      Output: sk_score_inc, add a point a clock cycle or not
+    reg [2:0]sk_score_acc = 3'd0;
+    wire [2:0]sk_score_add; // XXX generate this signal somewhere
+    always @(posedge clk)
+        if (rst || score_reset)
+            sk_score_acc <= 3'd0;
+        else if (sk_score_acc)
+            sk_score_acc <= sk_score_acc - 3'd1;
+        else if (sk_score_add)
+            sk_score_acc <= sk_score_add;
+    assign sk_score_inc = |sk_score_acc;
 
     // And the logic for writing those scores into memory.  Which happens
     // in many (not all) of the opcodes in the state machine.
@@ -411,13 +429,16 @@ module fpga_robots_game_play(
             mcmd_pending <= MCMD_NONE;
             mcmd_modified <= 1'd0;
         end
-    // XXX there's a lot more to be done here
 
     // Figure out some things about the move command mcmd_pending
     //      move_player_{x,y} - where the player is moving to
     //      mcmd_{n,s,e,w}ward - movement in a general direction
     //      mcmd_dec_{stay,wait,tele} - indicates these three commands
     //      move_oobounds - indicates move is out of bounds
+    //      mcmd_nonlethal - if this move would result in player death, does
+    //          that prevent it from happening?
+    //      mcmd_continuous - does this move continue happening as long as
+    //          it can?
     reg [6:0]move_player_x;
     reg [6:0]move_player_y;
     reg move_oobounds;
@@ -463,6 +484,30 @@ module fpga_robots_game_play(
             move_oobounds = (move_player_y == 7'd95);
         end else if (mcmd_dec_tele)
             move_player_y = new_player_y;
+    end
+
+    reg mcmd_nonlethal, mcmd_continuous;
+    always @* begin
+        mcmd_nonlethal = 1'd1;
+        mcmd_continuous = 1'd0;
+        case (mcmd_pending)
+        MCMD_WAIT: begin
+            // 'w' command: wait for the robots to catch you
+            mcmd_nonlethal = 1'd0;
+            mcmd_continuous = 1'd1;
+        end
+        MCMD_TELE: begin
+            // 't' command: teleport and hope you don't land on a robot
+            // or trash
+            mcmd_nonlethal = 1'd0;
+        end
+        default: begin
+            // directional move commands and MCMD_STAY: These move
+            // one step, or continuously if the modifier key is pressed.
+            // They don't move at all if it's not safe.
+            mcmd_continuous = mcmd_modified;
+        end
+        endcase
     end
 
     // Logic for moving the playing field elements (esp robots) when the
@@ -596,6 +641,21 @@ module fpga_robots_game_play(
             move_result[5:4] = move_combined;
     end
 
+    // A player move command is handled in a sequence of OPC_MV_* states:
+    //      OPC_MV_ZEROTOP - preparation
+    //      OPC_MV_DOMOVE - perform the move; this is a "dry run" that
+    //          isn't permanently stored & doesn't increase the score,
+    //          it's just for figuring out if the move can complete.
+    //      If move doesn't complete: it ends here; otherwise:
+    //      OPC_MV_ZEROTOP - preparation for the real thing
+    //      OPC_MV_DOMOVE - do the real thing including scoring
+    //      OPC_MV_COPYDOWN - make the result visible
+    //      If move continues: repeat from top
+    // This is the logic to sequence those.
+    // Major inputs:
+    //      mcmd_pending_any - a command is pending
+    // XXX
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     reg want_attention_f2;
@@ -610,7 +670,6 @@ module fpga_robots_game_play(
         cmd_dump_clr = 1'd0;
         skw_didread = 1'd0;
         sk_level_inc = 1'd0;
-        sk_score_inc = 1'd0;
         score_reset = 1'd0;
         want_attention_f2 = 1'd0;
         dump_going = 1'd0;
