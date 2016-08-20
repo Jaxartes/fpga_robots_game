@@ -212,7 +212,7 @@ module fpga_robots_game_play(
     //      Input: sk_score_add, points to add
     //      Output: sk_score_inc, add a point a clock cycle or not
     reg [2:0]sk_score_acc = 3'd0;
-    wire [2:0]sk_score_add; // XXX generate this signal somewhere
+    reg [2:0]sk_score_add;
     always @(posedge clk)
         if (rst || score_reset)
             sk_score_acc <= 3'd0;
@@ -653,8 +653,62 @@ module fpga_robots_game_play(
     //      If move continues: repeat from top
     // This is the logic to sequence those.
     // Major inputs:
-    //      mcmd_pending_any - a command is pending
-    // XXX
+    //      mcsq_reset - pulse this to reset the state for a new command
+    //      mcsq_phase_up - pulse to signal second time through OPC_MV_*
+    // Major state variables:
+    //      mcsq_proceed - can command proceed (so far)?
+    //      mcsq_phase - becomes 1 the second time through OPC_MV_*
+    //      mcsq_scorable - can player get points from this?
+    // Major outputs:
+    //      sk_score_add - how much to add to the score
+    // Other signals of interest:
+    //      mcsq_movetime - Pulses during the clock cycles in which
+    //          a move is actually happening.
+    //      mcsq_dont_proceed - pulse to indicate command cannot proceed;
+    //          built up of various other signals
+    //      mcsq_dont_score - pulse to indicate that command cannot give
+    //          the player points; built up of various other signals
+    reg mcsq_reset, mcsq_phase_up;
+    reg mcsq_proceed = 1'd1;
+    reg mcsq_phase = 1'd0;
+    reg mcsq_scorable = 1'd0;
+
+    wire mcsq_movetime =
+        (sml_opcode == OPC_MV_DOMOVE) &&
+        ((sml_ph2 || sml_ph4) && !sml_rgt);
+    wire mcsq_dont_proceed =
+        mcmd_nonlethal && // "non lethal" commands stop if they'd kill player
+        move_kill_player && // would this one kill player right now?
+        mcsq_movetime; // only if we're moving
+    wire mcsq_dont_score =
+        move_kill_player && // if the player dies
+        mcsq_movetime; // only if we're moving
+
+    always @(posedge clk)
+        if (rst || mcsq_reset) begin
+            mcsq_proceed <= 1'd1;
+            mcsq_phase <= 1'd0;
+            mcsq_scorable <= 1'd1;
+        end else begin
+            if (mcsq_dont_proceed) mcsq_proceed <= 1'd0;
+            if (mcsq_phase_up) mcsq_phase <= 1'd1;
+            if (mcsq_dont_score) mcsq_scorable <= 1'd0;
+        end
+
+    always @* begin
+        sk_score_add = 3'd0; // most of the time you don't get points
+        if (mcsq_movetime && // but only when moving
+            mcsq_phase && // and only in the 2nd phase of the move
+            mcsq_scorable) begin // and not if the player is killed
+            // So, we get points for robots killed, if any.
+            if (mcmd_dec_wait)
+                // two points per robot in the 'wait' command
+                sk_score_add = { move_kill_robots, 1'd0 };
+            else
+                // one point per robot in other commands
+                sk_score_add = { 1'd0, move_kill_robots };
+        end
+    end
 
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
@@ -674,6 +728,8 @@ module fpga_robots_game_play(
         want_attention_f2 = 1'd0;
         dump_going = 1'd0;
         mcmd_clear_pending = 1'd0;
+        mcsq_reset = 1'd0;
+        mcsq_phase_up = 1'd0;
 
         case(sml_opcode)
         OPC_IDLE: begin
@@ -699,9 +755,8 @@ module fpga_robots_game_play(
                 cmd_dump_clr = 1'd1;
                 sml_opcode_next = OPC_DUMP;
             end else if (mcmd_pending_any) begin // command to move player
-                // XXX this is just dummy code and doesn't do the whole thing,
-                // for now it just does a dummy move like F3
                 sml_opcode_next = OPC_MV_ZEROTOP;
+                mcsq_reset = 1'd1; // reset the command state in mcsq_*
             end
             // XXX handle all the commands here
         end
@@ -818,9 +873,24 @@ module fpga_robots_game_play(
             end
             tm_wen = (sml_ph2 || sml_ph4) && !sml_rgt;
             tm_wrt = move_result; // only matters in ph2 & ph4
-            sml_opcode_next = OPC_MV_COPYDOWN; // XXX do for real
-            // XXX handle score keeping
-            // XXX handle failure
+
+            // See what will happen next
+            if (mcsq_phase) begin
+                // It's going through states the second time, so go
+                // to state OPC_MV_COPYDOWN to copy the move results
+                // and make them visible
+                sml_opcode_next = OPC_MV_COPYDOWN;
+            end else if (mcsq_proceed) begin
+                // It's going through states the first time, and there
+                // was no problem, so it can proceed to do so again,
+                // from OPC_MV_ZEROTOP.
+                sml_opcode_next = OPC_MV_ZEROTOP;
+                mcsq_phase_up = 1'd1;
+            end else begin
+                // It's going through states the first time, and it turns
+                // out it can't continue.
+                sml_opcode_next = OPC_IDLE;
+            end
         end
         OPC_MV_COPYDOWN: begin
             // At the end of a successful move, copy from the upper half
@@ -839,7 +909,7 @@ module fpga_robots_game_play(
             // When this is done, go back to OPC_IDLE which gets to decide
             // what we'll be doing.
             sml_opcode_next = OPC_IDLE;
-            mcmd_clear_pending = 1'd1; // clear the command, it's served
+            mcmd_clear_pending = 1'd1; // clear the command, it's served XXX no
         end
         endcase
     end
