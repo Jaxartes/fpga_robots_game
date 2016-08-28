@@ -1,3 +1,4 @@
+#!/usr/bin/wish
 # fpga_robots_interface.tcl
 # Jeremy Dilatush - started May 2016
 #
@@ -5,31 +6,28 @@
 # the FPGA over a serial port, and can send key codes, instead of
 # using a PS/2 keyboard connected to the FPGA.
 
-# It can be run on a TTY (where it just takes the "keystrokes" as
-# characters) or graphically (using Tk, where a visual keyboard is shown
-# and keystrokes are also accepted)
+# It needs to be run in a graphical environment, not just on a TTY.
+# (SSH's "port forwarding" is a dear friend.)  I tried writing one that
+# would work on a TTY, but it required messing with TTY state more than
+# I feel like.
 
-# To run:  tclsh fpga_robots_interface.tcl
+# The GUI window accepts keystrokes, and also has a picture of a keyboard
+# (with just the relevant keys) where you can perform commands using
+# mouse-clicks.
+
+# To run:  wish fpga_robots_interface.tcl
 # optionally followed by additional words:
 #       /dev/tty... - name of TTY device to use
-#       gui - display a GUI
-
-# XXX this is just a start.  It needs:
-#       + more keycode and characters handled
-#       + put the TTY into raw mode
 
 # basic configuration settings
 
 set dev /dev/ttyUSB1
 set baud 115200
-set gui 0
 set handshake xonxoff
 set delay 100 ; # milliseconds between key movements
 
 foreach arg $argv {
-    if {$arg eq "gui"} {
-        set gui 1
-    } elseif {[string index $arg 0] eq "/"} {
+    if {[string index $arg 0] eq "/"} {
         set dev $arg
     } else {
         puts stderr "Unknown command line option '$arg'."
@@ -193,7 +191,7 @@ proc handle_stdin {} {
 }
 
 # start up graphical interface if desired
-if {$gui} {
+if {1} {
     package require Tk
     canvas .c -width 320 -height 240 -background "\#000"
     foreach {culx culy clrx clry txt sym} {
@@ -242,10 +240,6 @@ puts stderr \
 
 # now that everything is set up, go into the event loop where we wait for
 # things to happen (keys and buttons moving).
-if {$gui} {
-    # Tk will go into an event loop on its own when it gets to the end
-    # of code
-} else {
-    # enter event loop
-    vwait forever
-}
+
+# Tk will go into an event loop on its own when it gets to the end
+# of code

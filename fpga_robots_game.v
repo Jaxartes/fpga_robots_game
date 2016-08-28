@@ -44,7 +44,8 @@ module fpga_robots_game(
     );
 
     // Reset.  Driven by the reset button and the clock's "LOCKED" signal.
-    // Or by the shift-scroll key combination (twice).
+    // Or by the shift-scroll key combination (twice).  Also it resets itself
+    // at startup time.
     reg rst2 = 1'd1, rst3 = 1'd1, rst4 = 1'd1;
     reg [3:0] rstctr = 4'd0;
     wire ctl_driven_reset;

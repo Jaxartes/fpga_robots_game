@@ -13,7 +13,7 @@
 module fpga_robots_game_play(
     // system wide control signals
     input clk, // clock: rising edge active, everything is synched to this
-    input rst, // reset: active high, synchronous
+    input rst, // reset: active high, synchronous.
 
     // Command bits, as found in the keyboard lookup table.  They'll
     // be pulsed when the command is issued, it's up to this module
@@ -172,8 +172,9 @@ module fpga_robots_game_play(
     wire sml_x_min = !(|sml_x); // sml_x == 0
     wire sml_y_min = !(|sml_y); // sml_y == 0
     wire sml_single = // pulses once per opcode, for things that only
-                      // need to be done that one time
-        sml_ph0 && sml_x_min && sml_y_min;
+                      // need to be done that one time; in particular it
+                      // pulses during the last clock of that opcode
+        sml_ph4 && sml_x_min && sml_y_min;
 
     // Score keeping
     reg score_reset; // pulse to reset the store
@@ -314,22 +315,38 @@ module fpga_robots_game_play(
             place_robot_old <= place_robot;
 
     // Logic for determining a player position, pseudorandomly, when starting
-    // a new level.
+    // a new level or when teleporting.
+    reg rand_player_new = 1'd1;
+    reg [6:0]rand_player_x = 7'd0;
+    reg [6:0]rand_player_y = 7'd0;
+    always @(posedge clk)
+        if (rst || rand_player_new) begin
+            rand_player_x <= (prng[12:6] < 7'd120) ?
+                        prng[12:6] : // 0-119
+                        7'd60; // 60
+            rand_player_y <= { 1'd0, prng[5:0] } + 6'd16; // 16-79
+        end
+
+    // And change player position, when starting a new level, or teleporting,
+    // or completing a move.
+    reg move_player_happens; // pulse this when the move is complete
     reg [6:0]player_x = 7'd0;
     reg [6:0]player_y = 7'd0;
-    wire [6:0]simple_new_player_x = prng[6:0]; // 0-127, but 120-127 not good
-    wire [6:0]new_player_x = (prng[12:6] < 7'd120) ?
-                             prng[12:6] : // 0-119
-                             7'd60; // 60
-    wire [6:0]new_player_y = { 1'd0, prng[5:0] } + 6'd16; // 16-79
     always @(posedge clk)
         if (rst || score_reset) begin
             player_x <= 7'd0;
             player_y <= 7'd0;
+            rand_player_new <= 1'd1;
         end else if (sk_level_inc) begin
-            player_x <= new_player_x;
-            player_y <= new_player_y;
-        end
+            player_x <= rand_player_x;
+            player_y <= rand_player_y;
+            rand_player_new <= 1'd1;
+        end else if (move_player_happens) begin
+            player_x <= move_player_x;
+            player_y <= move_player_y;
+            rand_player_new <= 1'd1;
+        end else
+            rand_player_new <= 1'd0;
     wire place_player_pair =
         (sml_x == player_x) && // right cell horizontally
         (sml_y == player_y[6:1]); // right *pair* of cells vertically
@@ -418,7 +435,7 @@ module fpga_robots_game_play(
             // reset: don't have any commands pending
             mcmd_pending <= MCMD_NONE;
             mcmd_modified <= 1'd0;
-        end else if (cmd_any && !mcmd_pending_any) begin
+        end else if (cmd_any && !mcmd_pending_any && !player_dead) begin
             // If no command was pending and a new command comes in, record
             // it.  (If a command comes in while another was pending, ignore
             // it.)
@@ -474,7 +491,7 @@ module fpga_robots_game_play(
             move_player_x = player_x + 7'd1;
             move_oobounds = (move_player_x == 7'd127);
         end else if (mcmd_dec_tele)
-            move_player_x = new_player_x;
+            move_player_x = rand_player_x;
 
         if (mcmd_nward) begin
             move_player_y = player_y - 7'd1;
@@ -483,7 +500,7 @@ module fpga_robots_game_play(
             move_player_y = player_y + 7'd1;
             move_oobounds = (move_player_y == 7'd95);
         end else if (mcmd_dec_tele)
-            move_player_y = new_player_y;
+            move_player_y = rand_player_y;
     end
 
     reg mcmd_nonlethal, mcmd_continuous;
@@ -536,9 +553,8 @@ module fpga_robots_game_play(
     always @* begin
         move_to_x_delta = 7'd0;
         move_to_y_delta = 7'd0;
-        if (move_what == PAC_ROBOT || move_what == PAC_PLAYER) begin
-            // robot can move; figure out direction in X & Y dimensions
-            // player can move too
+        if (move_what == PAC_ROBOT) begin
+            // robot moves by steps (players move differently)
             if (move_player_x < move_from_where_x) begin
                 // leftward
                 move_to_x_delta = 7'd127;
@@ -555,8 +571,16 @@ module fpga_robots_game_play(
             end
         end
     end
-    wire [6:0]move_to_x = move_from_where_x + move_to_x_delta;
-    wire [6:0]move_to_y = move_from_where_y + move_to_y_delta;
+    reg [6:0]move_to_x;
+    reg [6:0]move_to_y;
+    always @* begin
+        move_to_x = move_from_where_x + move_to_x_delta;
+        move_to_y = move_from_where_y + move_to_y_delta;
+        if (move_what == PAC_PLAYER) begin
+            move_to_x = move_player_x;
+            move_to_y = move_player_y;
+        end
+    end
     wire [12:0]move_to_adr = { move_to_y[6:1], move_to_x[6:0] };
     wire move_to_half = move_to_y[0];
 
@@ -659,6 +683,7 @@ module fpga_robots_game_play(
     //      mcsq_proceed - can command proceed (so far)?
     //      mcsq_phase - becomes 1 the second time through OPC_MV_*
     //      mcsq_scorable - can player get points from this?
+    //      player_dead - player is dead & can't play any more
     // Major outputs:
     //      sk_score_add - how much to add to the score
     // Other signals of interest:
@@ -672,6 +697,7 @@ module fpga_robots_game_play(
     reg mcsq_proceed = 1'd1;
     reg mcsq_phase = 1'd0;
     reg mcsq_scorable = 1'd0;
+    reg player_dead = 1'd0;
 
     wire mcsq_movetime =
         (sml_opcode == OPC_MV_DOMOVE) &&
@@ -694,6 +720,12 @@ module fpga_robots_game_play(
             if (mcsq_phase_up) mcsq_phase <= 1'd1;
             if (mcsq_dont_score) mcsq_scorable <= 1'd0;
         end
+
+    always @(posedge clk)
+        if (rst || score_reset)
+            player_dead <= 1'd0;
+        else if (mcsq_movetime && move_kill_player && !mcmd_nonlethal)
+            player_dead <= 1'd1;
 
     always @* begin
         sk_score_add = 3'd0; // most of the time you don't get points
@@ -730,6 +762,7 @@ module fpga_robots_game_play(
         mcmd_clear_pending = 1'd0;
         mcsq_reset = 1'd0;
         mcsq_phase_up = 1'd0;
+        move_player_happens = 1'd0;
 
         case(sml_opcode)
         OPC_IDLE: begin
@@ -737,14 +770,19 @@ module fpga_robots_game_play(
             // processed through 'cmd_*'.  Move commands are processed
             // through an intermediate layer before coming here, see 'mcmd'.
 
-            if (cmd_fns[2]) begin // F3: starts some parts of a "move"
-                cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
+            if (mcmd_pending_any) begin // command to move player
                 sml_opcode_next = OPC_MV_ZEROTOP;
+                mcsq_reset = 1'd1; // reset the command state in mcsq_*
+            end else if (cmd_fns[2]) begin // F3: debug part of movement
+                // XXX get rid of or replace this before release
+                cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
+                move_player_happens = 1'd1;
             end else if (cmd_fns[0]) begin // F1: new level
+                // XXX get rid of or replace this before release
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
                 sk_level_inc = 1'd1;
                 sml_opcode_next = OPC_NEWLEVEL;
-            end else if (cmd_fns[1]) begin // F2: beep
+            end else if (cmd_fns[1]) begin // F2: attention (beep & flash)
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
                 want_attention_f2 = 1'd1; // signal for a beep
             end else if (cmd_quit) begin // q/esc/bs: new game
@@ -754,9 +792,6 @@ module fpga_robots_game_play(
             end else if (cmd_dump_pending) begin // data dump over serial port
                 cmd_dump_clr = 1'd1;
                 sml_opcode_next = OPC_DUMP;
-            end else if (mcmd_pending_any) begin // command to move player
-                sml_opcode_next = OPC_MV_ZEROTOP;
-                mcsq_reset = 1'd1; // reset the command state in mcsq_*
             end
             // XXX handle all the commands here
         end
@@ -885,7 +920,7 @@ module fpga_robots_game_play(
                 // was no problem, so it can proceed to do so again,
                 // from OPC_MV_ZEROTOP.
                 sml_opcode_next = OPC_MV_ZEROTOP;
-                mcsq_phase_up = 1'd1;
+                if (sml_single) mcsq_phase_up = 1'd1;
             end else begin
                 // It's going through states the first time, and it turns
                 // out it can't continue.
@@ -907,14 +942,43 @@ module fpga_robots_game_play(
             tm_wrt = { 4'd0, tm_red[7:4] };
 
             // When this is done, go back to OPC_IDLE which gets to decide
-            // what we'll be doing.
+            // what we'll be doing next.
             sml_opcode_next = OPC_IDLE;
-            mcmd_clear_pending = 1'd1; // clear the command, it's served XXX no
+            if (sml_single) begin
+                // After OPC_MV_COPYDOWN is done: maybe clear the command;
+                // and maybe move the player; it depends.
+                if (!mcsq_phase) begin
+                    // Phase zero: Goes on again.  Unless it failed.
+                    if (!mcsq_proceed)
+                        mcmd_clear_pending = 1'd1;
+                end else if (mcmd_continuous) begin
+                    // Continous move commands: These keep going until
+                    // they can't anymore.
+                    if (!mcsq_proceed)
+                        mcmd_clear_pending = 1'd1;
+                    else if (player_dead)
+                        mcmd_clear_pending = 1'd1;
+                    else
+                        move_player_happens = 1'd1;
+                end else begin
+                    // Single move commands: These don't repeat.
+                    mcmd_clear_pending = 1'd1;
+                    move_player_happens = mcsq_proceed;
+                end
+            end
         end
         endcase
     end
 
     // Logic for getting the player's attention
+`ifdef REALL
     assign want_attention = want_attention_f2; // XXX add more
+`else
+    assign want_attention = want_attention_f2 || mcmd_dec_tele;
+`endif
+
+    // XXX attn when a move command comes in but is rejected (cmd_any && (mcmd_pending_any || player_dead)
+    // XXX attn when player dies
+    // XXX attn when a single move command fails because player would die
 
 endmodule
