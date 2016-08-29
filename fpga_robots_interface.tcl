@@ -54,24 +54,35 @@ foreach {keysym sticky kcext kcbyte altkeysym} {
     Alt_R      1 1 0x11 ""
     Meta_R     1 1 0x27 ""
     Super_R    1 1 0x27 ""
-    t          0 0 0x2c T
-    q          0 0 0x15 Q
-    w          0 0 0x1d W
+    t          0 0 0x2c ""
+    q          0 0 0x15 ""
+    w          0 0 0x1d ""
     F1         0 0 0x05 ""
     F2         0 0 0x06 ""
     F3         0 0 0x04 ""
-    y          0 0 0x35 Y
-    k          0 0 0x42 K
-    u          0 0 0x3c U
-    h          0 0 0x33 H
+    y          0 0 0x35 ""
+    k          0 0 0x42 ""
+    u          0 0 0x3c ""
+    h          0 0 0x33 ""
     period     0 0 0x49 greater
-    l          0 0 0x4b L
-    b          0 0 0x32 B
-    j          0 0 0x3b J
-    n          0 0 0x31 N
+    l          0 0 0x4b ""
+    b          0 0 0x32 ""
+    j          0 0 0x3b ""
+    n          0 0 0x31 ""
+    Scroll     0 0 0x7e ""
+    Up         0 1 0x75 ""
+    Down       0 1 0x72 ""
+    Left       0 1 0x6B ""
+    Right      0 1 0x74 ""
 } {
-    foreach ks \
-    [list $keysym [string toupper $keysym] [string tolower $keysym]] {
+    set kslist [list]
+    lappend kslist $keysym
+    lappend kslist [string toupper $keysym]
+    lappend kslist [string tolower $keysym]
+    if {$altkeysym ne ""} {
+        lappend kslist $altkeysym
+    }
+    foreach ks $kslist {
         set bykeysym($ks) [list $sticky $kcext $kcbyte]
     }
 }
@@ -152,6 +163,26 @@ proc gui_button {sym} {
     }
 }
 
+# gui_reset_button: handle the "RST" GUI button to reset the game logic
+# by simulating SHIFT-SCROLL-SCROLL
+proc gui_reset_button {sym} {
+    global delay
+    set keymits [list]
+    lappend keymits 1 Shift_L
+    lappend keymits 1 Scroll
+    lappend keymits 0 Scroll
+    lappend keymits 1 Scroll
+    lappend keymits 0 Scroll
+    lappend keymits 0 Shift_L
+    set accdelay $delay
+    foreach {kmd kmk} $keymits {
+        after $accdelay keymit $kmd $kmk
+        set accdelay [expr {$accdelay + $delay}]
+    }
+    gui_button_flash $sym
+    after $accdelay gui_button_flash $sym
+}
+
 # gui_button_flash: put the gui button in/out of inverse video to indicate
 # it's active
 proc gui_button_flash {sym} {
@@ -211,7 +242,9 @@ if {1} {
         4 5 4 5 "F1" "F1"
         5 5 5 5 "F2" "F2"
         6 5 6 5 "F3" "F3"
+        6 1 6 1 "RST" "RST"
     } {
+        # draw the "key"
         .c create rectangle \
             [expr {$culx * 40 + 2}]  [expr {$culy * 40 + 2}] \
             [expr {$clrx * 40 + 38}] [expr {$clry * 40 + 38}] \
@@ -223,11 +256,20 @@ if {1} {
             -fill "\#0cc" -font "Serif 9" \
             -anchor center -text $txt \
             -tags [list key$sym cap$sym]
+        # initialize its state 
         set stuck($sym) 0
         .c bind key$sym <Button-1> [list gui_button $sym]
     }
+
+    # bind what happens to actual keystrokes
     bind . <KeyPress> "keymit 1 %K"
     bind . <KeyRelease> "keymit 0 %K"
+
+    # the "RST" button is special
+    .c itemconfigure bdyRST -fill "\#c00" -outline "\#ccc"
+    .c itemconfigure capRST -fill "\#ccc"
+    .c bind keyRST <Button-1> [list gui_reset_button RST]
+
     pack .c
 }
 
