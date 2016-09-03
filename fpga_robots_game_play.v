@@ -925,6 +925,7 @@ module fpga_robots_game_play(
                 // It's going through states the first time, and it turns
                 // out it can't continue.
                 sml_opcode_next = OPC_IDLE;
+                mcmd_clear_pending = 1'd1;
             end
         end
         OPC_MV_COPYDOWN: begin
@@ -971,11 +972,7 @@ module fpga_robots_game_play(
     end
 
     // Logic for getting the player's attention
-`ifdef REALL
     assign want_attention = want_attention_f2; // XXX add more
-`else
-    assign want_attention = want_attention_f2 || mcmd_dec_tele;
-`endif
 
     // XXX attn when a move command comes in but is rejected (cmd_any && (mcmd_pending_any || player_dead)
     // XXX attn when player dies
