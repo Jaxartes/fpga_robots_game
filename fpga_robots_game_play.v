@@ -631,10 +631,22 @@ module fpga_robots_game_play(
                 move_kill_player = 1'd1;
             end
             endcase
-        PAC_TRASH:
-            // Trash is being "moved".  Since it never goes anywhere,
-            // move_obstruction == PAC_TRASH too.
-            move_combined = PAC_TRASH;
+        PAC_TRASH: begin
+            // Trash is being "moved".  It doesn't really move, but in this
+            // logic, staying still is also movement.
+            move_combined = PAC_TRASH; // trash plus anything is trash
+            case (move_obstruction)
+            // PAC_EMPTY: Trash doesn't collide with anything
+            PAC_ROBOT:
+                // Robot moved where trash is
+                move_kill_robots = 1'd1;
+            // PAC_TRASH: Shouldn't happen (shouldn't be two trash in the
+            // same cell) but it's harmless if it does.
+            PAC_PLAYER:
+                // Player moved where trash is
+                move_kill_player = 1'd1;
+            endcase
+        end
         PAC_PLAYER:
             // Player is being moved.
             case (move_obstruction)
