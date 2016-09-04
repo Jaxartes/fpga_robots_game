@@ -452,13 +452,16 @@ module fpga_robots_game_play(
     //      mcmd_{n,s,e,w}ward - movement in a general direction
     //      mcmd_dec_{stay,wait,tele} - indicates these three commands
     //      move_oobounds - indicates move is out of bounds
+    //      move_oobounds_x - ... only in the X direction
+    //      move_oobounds_y - ... only in the Y direction
     //      mcmd_nonlethal - if this move would result in player death, does
     //          that prevent it from happening?
     //      mcmd_continuous - does this move continue happening as long as
     //          it can?
     reg [6:0]move_player_x;
     reg [6:0]move_player_y;
-    reg move_oobounds;
+    reg move_oobounds_x, move_oobounds_y;
+    wire move_oobounds = move_oobounds_x || move_oobounds_y;
     reg mcmd_nward, mcmd_sward, mcmd_eward, mcmd_wward;
     always @* begin
         mcmd_nward = 1'd0;
@@ -483,22 +486,23 @@ module fpga_robots_game_play(
     always @* begin
         move_player_x = player_x;
         move_player_y = player_y;
-        move_oobounds = 1'd0;
+        move_oobounds_x = 1'd0;
+        move_oobounds_y = 1'd0;
         if (mcmd_wward) begin
             move_player_x = player_x - 7'd1;
-            move_oobounds = (move_player_x == 7'd0);
+            move_oobounds_x = (player_x == 7'd0);
         end else if (mcmd_eward) begin
             move_player_x = player_x + 7'd1;
-            move_oobounds = (move_player_x == 7'd127);
+            move_oobounds_x = (player_x == 7'd119);
         end else if (mcmd_dec_tele)
             move_player_x = rand_player_x;
 
         if (mcmd_nward) begin
             move_player_y = player_y - 7'd1;
-            move_oobounds = (move_player_y == 7'd0);
+            move_oobounds_y = (player_y == 7'd0);
         end else if (mcmd_sward) begin
             move_player_y = player_y + 7'd1;
-            move_oobounds = (move_player_y == 7'd95);
+            move_oobounds_y = (player_y == 7'd95);
         end else if (mcmd_dec_tele)
             move_player_y = rand_player_y;
     end
@@ -742,6 +746,24 @@ module fpga_robots_game_play(
         end
     end
 
+    // Find out if a level is complete by keeping track of any surviving
+    // robots.  This is done during OPC_MV_COPYDOWN, which is run for
+    // every successful move and only for successful moves.  During other
+    // OPC_* values, this state is meaningless or invalid.
+    // Signals:
+    //      surviving_robot - pulses every time a surviving robot is seen
+    //      surviving_robot_any - high if there have been any
+    //      surviving_robot_start - start checking for surviving robots;
+    //              pulsed when entering OPC_MV_COPYDOWN
+    reg surviving_robot;
+    reg surviving_robot_any = 1'd0;
+    reg surviving_robot_start;
+    always @(posedge clk)
+        if (rst || surviving_robot_start)
+            surviving_robot_any <= 1'd0;
+        else if (surviving_robot)
+            surviving_robot_any <= 1'd1;
+
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     reg want_attention_f2;
@@ -763,6 +785,8 @@ module fpga_robots_game_play(
         mcsq_reset = 1'd0;
         mcsq_phase_up = 1'd0;
         move_player_happens = 1'd0;
+        surviving_robot = 1'd0;
+        surviving_robot_start = 1'd0;
 
         case(sml_opcode)
         OPC_IDLE: begin
@@ -770,8 +794,18 @@ module fpga_robots_game_play(
             // processed through 'cmd_*'.  Move commands are processed
             // through an intermediate layer before coming here, see 'mcmd'.
 
-            if (mcmd_pending_any) begin // command to move player
-                sml_opcode_next = OPC_MV_ZEROTOP;
+            if (cmd_quit) begin // q/esc/bs: new game
+                cmd_quit_clr = 1'd1;
+                score_reset = 1'd1; // reset score & level (but not high)
+                sml_opcode_next = OPC_NEWGAME; // and fill in the level
+                mcmd_clear_pending = 1'd1;
+            end else if (mcmd_pending_any) begin // command to move player
+                if (move_oobounds) begin
+                    // move would put player out of bounds, is not allowed
+                    mcmd_clear_pending = 1'd1;
+                end else begin
+                    sml_opcode_next = OPC_MV_ZEROTOP;
+                end
                 mcsq_reset = 1'd1; // reset the command state in mcsq_*
             end else if (cmd_fns[2]) begin // F3: debug part of movement
                 // XXX get rid of or replace this before release
@@ -785,10 +819,6 @@ module fpga_robots_game_play(
             end else if (cmd_fns[1]) begin // F2: attention (beep & flash)
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
                 want_attention_f2 = 1'd1; // signal for a beep
-            end else if (cmd_quit) begin // q/esc/bs: new game
-                cmd_quit_clr = 1'd1;
-                score_reset = 1'd1; // reset score & level (but not high)
-                sml_opcode_next = OPC_NEWGAME; // and fill in the level
             end else if (cmd_dump_pending) begin // data dump over serial port
                 cmd_dump_clr = 1'd1;
                 sml_opcode_next = OPC_DUMP;
@@ -861,7 +891,10 @@ module fpga_robots_game_play(
             sml_suspend = dump_suspend;
         end
         OPC_ENDLEVEL: begin
-            // XXX
+            // A level is ending.  Start a new one - the next one.
+            // XXX consider adding a delay here
+            sk_level_inc = sml_single;
+            sml_opcode_next = OPC_NEWLEVEL;
         end
         OPC_BOOT: begin
             // At reset or startup: start a new game
@@ -915,6 +948,7 @@ module fpga_robots_game_play(
                 // to state OPC_MV_COPYDOWN to copy the move results
                 // and make them visible
                 sml_opcode_next = OPC_MV_COPYDOWN;
+                if (sml_single) surviving_robot_start = 1'd1;
             end else if (mcsq_proceed) begin
                 // It's going through states the first time, and there
                 // was no problem, so it can proceed to do so again,
@@ -942,6 +976,10 @@ module fpga_robots_game_play(
             tm_wen = sml_ph1 && !sml_rgt && (vbi || !WAIT_FOR_VBI);
             tm_wrt = { 4'd0, tm_red[7:4] };
 
+            // See if a robot survives this move.
+            surviving_robot = tm_wen &&
+                ((tm_wrt[1:0] == PAC_ROBOT) || (tm_wrt[3:2] == PAC_ROBOT));
+
             // When this is done, go back to OPC_IDLE which gets to decide
             // what we'll be doing next.
             sml_opcode_next = OPC_IDLE;
@@ -952,6 +990,11 @@ module fpga_robots_game_play(
                     // Phase zero: Goes on again.  Unless it failed.
                     if (!mcsq_proceed)
                         mcmd_clear_pending = 1'd1;
+                end else if (!surviving_robot_any) begin
+                    // All the robots have been destroyed.  Stop moving
+                    // and go to the next level.
+                    mcmd_clear_pending = 1'd1;
+                    sml_opcode_next = OPC_ENDLEVEL;
                 end else if (mcmd_continuous) begin
                     // Continous move commands: These keep going until
                     // they can't anymore.
