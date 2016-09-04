@@ -971,14 +971,24 @@ module fpga_robots_game_play(
             // for the best looking results
             sml_suspend = WAIT_FOR_VBI && !vbi;
 
-            // Do the copy, by reading at ph0 & writing back at ph1.
+            // Interact with memory: On the left side it copies from
+            // upper half bytes to lower half bytes.  On the right
+            // side it updates scores.
             tm_adr = sml_adr;
-            tm_wen = sml_ph1 && !sml_rgt && (vbi || !WAIT_FOR_VBI);
-            tm_wrt = { 4'd0, tm_red[7:4] };
-
-            // See if a robot survives this move.
-            surviving_robot = tm_wen &&
-                ((tm_wrt[1:0] == PAC_ROBOT) || (tm_wrt[3:2] == PAC_ROBOT));
+            if (sml_rgt) begin
+                // Update the scores on the right side of the screen
+                // YYY not quite sure about the logic here for skw_didread
+                // and tm_wen WRT the wait for VBI stuff
+                skw_didread = sml_ph1 && (vbi || !WAIT_FOR_VBI);
+                tm_wen = skw_wen;
+                tm_wrt = skw_wrt;
+            end else begin
+                // Do the copy, by reading at ph0 & writing back at ph1.
+                tm_wen = sml_ph1 && (vbi || !WAIT_FOR_VBI);
+                tm_wrt = { 4'd0, tm_red[7:4] };
+                surviving_robot = tm_wen &&
+                    ((tm_wrt[1:0] == PAC_ROBOT) || (tm_wrt[3:2] == PAC_ROBOT));
+            end
 
             // When this is done, go back to OPC_IDLE which gets to decide
             // what we'll be doing next.
