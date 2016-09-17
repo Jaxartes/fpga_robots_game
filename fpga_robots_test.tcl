@@ -126,8 +126,8 @@ proc fpgatalk_init {} {
     if {$fpgafp ne ""} continue
 
     # open the device
-    if {[catch {open $cfg(dev) r+} err]} {
-        puts stderr "*** error opening $cfg(dev): $err"
+    if {[catch {open $cfg(device) r+} fpgafp]} {
+        puts stderr "*** error opening $cfg(device): $fpgafp"
         error "fatal error"
     }
 
@@ -137,7 +137,7 @@ proc fpgatalk_init {} {
         fconfigure $fpgafp -handshake xonxoff
         fconfigure $fpgafp -mode $cfg(baud),n,8,1
     } err]} {
-        puts stderr "*** error setting up $cfg(dev): $err"
+        puts stderr "*** error setting up $cfg(device): $err"
         error "fatal error"
     }
 
@@ -179,7 +179,7 @@ proc fpgatalk_keymit {keys} {
     # build a list of bytes to send (and delays)
     foreach break {0 1} {
         # $break is 0 for make codes, 1 for break codes
-        foreach {kcext kcbyt} {
+        foreach {kcext kcbyt} $keys {
             if {$kcext} { lappend bytes 0xe0 }
             if {$break} { lappend bytes 0xf0 }
             lappend bytes $kcbyt
@@ -246,7 +246,7 @@ proc fpgtalk_command {cmd} {
 # state structure.  This may throw an error, in case of communications
 # problem, or return empty string, in case of bogus data.
 proc fpgatalk_get_dump {} {
-    global fpgafp cfg
+    global fpgafp cfg xdim ydim sdim
 
     # consume any input that isn't the dump
     fpgatalk_eat
@@ -295,7 +295,7 @@ proc fpgatalk_get_dump {} {
             if {$pos >= $len} {
                 error "Bad dump: cut short (ii)"
             }
-            set code [scan [string index $raw $pos] %c]]
+            set code [scan [string index $raw $pos] %c]
             incr pos
             if {$code & 64} {
                 # { 2'd1, byte[6:5], byte[3:0] } for byte >= 128
@@ -335,7 +335,7 @@ proc fpgatalk_get_dump {} {
             if {$pos >= $len} {
                 error "Bad dump: cut short (iii)"
             }
-            set code [scan [string index $raw $pos] %c]]
+            set code [scan [string index $raw $pos] %c]
             incr pos
             if {$code < 48 || $code >= 64} {
                 error [format "Bad dump: playing area byte %d exp 48-63" $code]
@@ -458,7 +458,7 @@ proc represent_state {state {indent ""}} {
             set pos [list $x $y]
             if {[info exists traa($pos)]} { append s "*"; continue }
             if {[info exists roba($pos)]} { append s "+"; continue }
-            if {$pos eq $player] { append s "@" ; continue }
+            if {$pos eq $player} { append s "@" ; continue }
 
             # nothing
             append s " "
@@ -671,12 +671,14 @@ while {1} {
             puts stderr "Starting a new game"
         }
         fpgtalk_command quit
+	incr ctr(move)
         after $cfg(movedelay)
         while {1} {
-            if {[catch {fpgatalk_dump} state]} {
+            if {[catch {fpgatalk_get_dump} state]} {
                 puts stderr $state
                 continue
             } else {
+		incr ctr(dump)
                 break
             }
         }
@@ -713,6 +715,8 @@ while {1} {
             continue
         }
     }
+
+	exit 99 ; # XXX grot
 
     # 
 
