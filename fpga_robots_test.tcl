@@ -243,7 +243,8 @@ proc fpgtalk_command {cmd} {
 }
 
 # fpgatalk_get_dump - retrieve a dump of the game state & return a game
-# state structure.  Caller should catch errors.
+# state structure.  This may throw an error, in case of communications
+# problem, or return empty string, in case of bogus data.
 proc fpgatalk_get_dump {} {
     global fpgafp cfg
 
@@ -330,6 +331,7 @@ proc fpgatalk_get_dump {} {
         }
         # followed by playing area info
         for {set x 0} {$x < $xdim} {incr x} {
+            # one byte, for two cells
             if {$pos >= $len} {
                 error "Bad dump: cut short (iii)"
             }
@@ -338,20 +340,81 @@ proc fpgatalk_get_dump {} {
             if {$code < 48 || $code >= 64} {
                 error [format "Bad dump: playing area byte %d exp 48-63" $code]
             }
-            set upper [expr {$code & 3}]
-            set lower [expr {($code >> 2) & 3}]
-            # XXX set player and/or add to robots/trashes
-            # XXX bear in mind reversed coordinates
-            # XXX check for multiple players
-            # XXX check for no player (ie not alive)
-        }
-        # XXX handle row ender
-    }
-    # XXX handle dump ender
-    # XXX put the results together into a state, including sorting robots & trashes
-}
 
-# XXX
+            # the two cells and their coordinates, unreversed
+            set cells [list]
+            lappend cells [expr {$xdim - 1 - $x}]
+            lappend cells [expr {($ydim - 1 - $y) * 2}]
+            lappend cells [expr {$code & 3}]
+            lappend cells [expr {$xdim - 1 - $x}]
+            lappend cells [expr {($ydim - 1 - $y) * 2 + 1}]
+            lappend cells [expr {($code >> 2) & 3}]
+            foreach {xx yy cv} $cells {
+                switch -- $cv {
+                    0 { # empty
+                    }
+                    1 { # robot
+                        lappend robots [list $xx $yy]
+                    }
+                    2 { # trash
+                        lappend trashes [list $xx $yy] 
+                    }
+                    3 { # player
+                        if {$player eq ""} {
+                            set player [list $xx $yy]
+                        } else {
+                            puts stderr "*** received dump with multiple players including two at $player and [list $xx $yy]"
+                            return ""
+                        }
+                    }
+                }
+            }
+        }
+
+        # row ends with char 37, "%"
+        if {$pos >= $len} {
+            error "Bad dump: cut short (iv)"
+        }
+        if {[string index $raw $pos] ne "%"} {
+            error [format "Bad dump: row end char %d expect 37" \
+                [scan [string index $raw $pos] %c]]
+        }
+        incr pos
+    }
+
+    # dump ends with char 38, "&"
+    if {$pos >= $len} {
+        error "Bad dump: cut short (v)"
+    }
+    if {[string index $raw $pos] ne "&"} {
+        error [format "Bad dump: row end char %d expect 38" \
+            [scan [string index $raw $pos] %c]]
+    }
+    incr pos
+
+    # dump should be done, but ignore any remaining characters we got
+
+    # put the results together
+    if {$score eq ""} {
+        error "Bad dump: missing score"
+    }
+    if {$level eq ""} {
+        error "Bad dump: missing level"
+    }
+    set state [list]
+    lappend state [expr {$player ne ""}] ; # player alive?
+    lappend state $score
+    lappend state $level
+    if {$player ne ""} {
+        lappend state $player
+    } else {
+        lappend state [list 0 0] ; # just a fake player position
+    }
+    lappend state [lsort $robots]
+    lappend state [lsort $trashes]
+
+    return $state
+}
 
 ### Misc utility functions
 
@@ -483,11 +546,108 @@ proc apply_move {state dx dy mul} {
 
 ### For determining a strategic move
 
-# XXX
+# good_move - Given a state of the game, figure out a good next move.
+# Returns one of the following lists:
+#   tele - recommend teleport
+#   wait - recommend wait
+#   $dx $dy - move by relative x & y coordinates
+# This logic is not very efficient, but that's ok.  Running on a gigahertz
+# range CPU, to test a low-cost FPGA implementation of a minicomputer game
+# from the 1980s, not much is needed.
+proc good_move {state} {
+    lassign $state alive score level player robots trashes
+
+    if {!$alive} {
+        error "Internal error: good_move called when player not alive"
+    }
+
+    # Consider what "wait" would do.  If we survive it, it's the best option.
+    set state2 $state
+    while {1} {
+        if {![lindex $state2 0]} {
+            # player didn't survive: don't use "wait"
+            break
+        }
+        if {[llength [lindex $state2 4]] == 0} {
+            # robots didn't survive: that's good
+            return "wait"
+        }
+        lassign [apply_move $state 0 0 2] possible state2
+        if {!$possible} {
+            # can't
+            break
+        }
+    }
+    
+    # Consider the possible eight directions of move and what happens from
+    # each.
+    foreach dx {-1 0 1} {
+        foreach dy {-1 0 1} {
+            lassign [apply_move $state $dx $dy 1] possible state2
+            if {$possible && [lindex $state2 0]} {
+                # we only care about moves that are possible and survivable
+                set dirs([list $dx $dy]) $state2
+            }
+        }
+    }
+    if {[array size dirs] == 0} {
+        # no acceptable moves, there's only one thing left to do
+        return "tele"
+    }
+    if {[array size dirs] == 1} {
+        # only one move is acceptable, best to do it then
+        return [lindex [array names dirs] 0]
+    }
+
+    # Two or more moves are possible: Try to pick a good one.
+    # If we can complete the level in one move, that's best.  If not,
+    # there's a tradeoff of three things:
+    #       + destroying robots (that is the end goal)
+    #       + creating trashes (to destroy more robots in the future)
+    #       + getting robots into a narrow line (to more easily destroy
+    #       them in the future); in my experience that's horizontal or
+    #       vertical
+    set bestdir ""
+    set bestdirgoodness 0
+    foreach {dir state2} [array get dirs] {
+        lassign $state2 alive2 score2 level2 player2 robots2 trashes2
+
+        # look for an immediate win
+        if {[llength $robots2] == 0} {
+            # yay!  no more robots!
+            return $dir
+        }
+
+        # score the "goodness" of the move
+        #       -3 points per robot
+        #       +2 points per trash
+        #       -1 point per cell of smallest dimension robots occupy
+        set goodness 0
+        incr goodness [expr {-3 * [llength $robots2]}]
+        incr goodness [expr {2 * [llength $trashes2]}]
+        set minx 999 ; set miny 999 ; set maxx -999 ; set maxy -999
+        foreach robot $robots2 {
+            lassign $robot x y
+            if {$minx > $x} { set minx x }
+            if {$maxx < $x} { set maxx x }
+            if {$miny > $y} { set minx y }
+            if {$maxy < $y} { set maxx y }
+        }
+        incr goodness [expr {-1 * min($maxx-$minx,$maxy-$miny)}]
+
+        # is it the best so far?
+        if {$bestdir eq "" || $goodness > $bestdirgoodness} {
+            set bestdirgoodness $goodness
+            set bestdir $dir
+        }
+    }
+
+    return $bestdir
+}
 
 ### Main program skeleton
 
-# YYY even when player dead, sometimes try a random move
-# YYY when going to new level or new game, report to the operator the number of robots; and check that player is alive
+# XXX even when player dead, sometimes try a random move
+# XXX when going to new level or new game, report to the operator the number of robots; and check that player is alive
 
 # XXX
