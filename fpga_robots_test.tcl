@@ -23,6 +23,10 @@
 # Parameters:
 #   strategy $num - Probability $num (in range 0-1) that it chooses
 #       a "strategic" move instead of a "random" one, each time.  Default 0.5.
+#   butfast $num - Probability $num (in range 0-1) that, when doing a
+#       "strategic" move, it just continues it as long as it can.  Default 0.1.
+#   newgame $num - Probability $num (in range 0-1) of starting a new game
+#       even when you don't need one.  Default 0.0.
 #   dumps $num - Probability $num (in range 0-1) that it requests a dump
 #       after each move.  The probability doesn't matter after certain moves,
 #       ones which leave the state uncertain ("t", "q", "w").  Default 0.5.
@@ -40,6 +44,8 @@
 
 array set cfg {
     ,strategy p strategy 0.5
+    ,butfast p butfast 0.1
+    ,newgame p newgame 0.0
     ,dumps p dumps 0.5
     ,keydelay ms keydelay 200
     ,movedelay ms movedelay 200
@@ -258,7 +264,9 @@ proc fpgatalk_get_dump {} {
 
     # now collect the dump output as long as we have any
     set raw [fpgatalk_eat]
-    puts stderr "Dump received [string length $raw] bytes"
+    if {$cfg(verbose)} {
+        puts stderr "Dump received [string length $raw] bytes"
+    }
 
     # now try to parse it
     set len [string length $raw]
@@ -344,10 +352,10 @@ proc fpgatalk_get_dump {} {
             # the two cells and their coordinates, unreversed
             set cells [list]
             lappend cells [expr {$xdim - 1 - $x}]
-            lappend cells [expr {($ydim - 1 - $y) * 2}]
+            lappend cells [expr {$ydim - 2 - $y}]
             lappend cells [expr {$code & 3}]
             lappend cells [expr {$xdim - 1 - $x}]
-            lappend cells [expr {($ydim - 1 - $y) * 2 + 1}]
+            lappend cells [expr {$ydim - 1 - $y}]
             lappend cells [expr {($code >> 2) & 3}]
             foreach {xx yy cv} $cells {
                 switch -- $cv {
@@ -439,7 +447,7 @@ proc represent_state {state {indent ""}} {
 
     set s ""
     append s "${indent}Player "
-    append s [expr {$alive ? "alive" : "dead"}]
+    append s [expr {$alive ? "alive @ $player" : "dead"}]
     append s ", score ${score}, level ${level}"
     append s "\n${indent}[llength $robots] robots;"
     append s " [llength $trashes] trashes.\n"
@@ -456,15 +464,17 @@ proc represent_state {state {indent ""}} {
 
             # deal with what's sitting here
             set pos [list $x $y]
+            if {$pos eq $player} { append s "@" ; continue }
             if {[info exists traa($pos)]} { append s "*"; continue }
             if {[info exists roba($pos)]} { append s "+"; continue }
-            if {$pos eq $player} { append s "@" ; continue }
 
             # nothing
-            append s " "
+            append s "."
         }
         append s "\n"
     }
+
+    return $s
 }
 
 ### For determining what effect a move would have 
@@ -529,15 +539,15 @@ proc apply_move {state dx dy mul} {
     foreach robot [array names robots2a] {
         if {$robots2a($robot) > 1 || [info exists trashes2a($robot)]} {
             # one or more robots destroyed by collision
-            set trashes2a($trash) 1
+            set trashes2a($robot) 1
             incr score2 [expr {$robots2a($robot) * $mul}]
             unset robots2a($robot)
         }
     }
     set trashes2 [lsort [array names trashes2a]]
     set robots2 [lsort [array names robots2a]]
-    if {[info exists trashes2a($player2)] ||
-        [info exists robots2a($player2)]} {
+    if {[info exists trashes2a($pos2)] ||
+        [info exists robots2a($pos2)]} {
         # a robot got to the player (or player got into trash): player dead
         return [list 1 [list 0 $score $level $pos2 $robots2 $trashes2]]
     }
@@ -547,7 +557,7 @@ proc apply_move {state dx dy mul} {
 ### For determining a strategic move
 
 # good_move - Given a state of the game, figure out a good next move.
-# Returns one of the following lists:
+# Returns the move as one of the following:
 #   tele - recommend teleport
 #   wait - recommend wait
 #   $dx $dy - move by relative x & y coordinates
@@ -572,7 +582,7 @@ proc good_move {state} {
             # robots didn't survive: that's good
             return "wait"
         }
-        lassign [apply_move $state 0 0 2] possible state2
+        lassign [apply_move $state2 0 0 2] possible state2
         if {!$possible} {
             # can't
             break
@@ -604,13 +614,13 @@ proc good_move {state} {
     # there's a tradeoff of three things:
     #       + destroying robots (that is the end goal)
     #       + creating trashes (to destroy more robots in the future)
-    #       + getting robots into a narrow line (to more easily destroy
-    #       them in the future); in my experience that's horizontal or
-    #       vertical
+    #       + getting robots into a narrow space (easier to destroy)
+    #       + being away from robots
     set bestdir ""
     set bestdirgoodness 0
     foreach {dir state2} [array get dirs] {
         lassign $state2 alive2 score2 level2 player2 robots2 trashes2
+        lassign $player2 px2 py2
 
         # look for an immediate win
         if {[llength $robots2] == 0} {
@@ -621,19 +631,25 @@ proc good_move {state} {
         # score the "goodness" of the move
         #       -3 points per robot
         #       +2 points per trash
-        #       -1 point per cell of smallest dimension robots occupy
+        #       -1 point per unit of smallest dimension robots occupy
+        #       +1 point per unit of distance from nearest robot
         set goodness 0
         incr goodness [expr {-3 * [llength $robots2]}]
         incr goodness [expr {2 * [llength $trashes2]}]
         set minx 999 ; set miny 999 ; set maxx -999 ; set maxy -999
+        set mind 999
         foreach robot $robots2 {
             lassign $robot x y
-            if {$minx > $x} { set minx x }
-            if {$maxx < $x} { set maxx x }
-            if {$miny > $y} { set minx y }
-            if {$maxy < $y} { set maxx y }
+            set minx [expr {min($x,$minx)}]
+            set maxx [expr {max($x,$maxx)}]
+            set miny [expr {min($y,$miny)}]
+            set maxy [expr {max($y,$maxy)}]
+            set dx [expr {abs($x - $px2)}]
+            set dy [expr {abs($y - $py2)}]
+            set mind [expr {min(max($dx,$dy),$mind)}]
         }
         incr goodness [expr {-1 * min($maxx-$minx,$maxy-$miny)}]
+        incr goodness $mind
 
         # is it the best so far?
         if {$bestdir eq "" || $goodness > $bestdirgoodness} {
@@ -666,10 +682,9 @@ while {1} {
     }
 
     # Do we need to start a new game?
-    if {$state eq "" || (rand() < 0.4 && ![lindex $state 0])} {
-        if {$cfg(verbose)} {
-            puts stderr "Starting a new game"
-        }
+    if {$state eq "" || (rand() < 0.6 && ![lindex $state 0]) ||
+        (rand() < $cfg(newgame))} {
+        puts stderr "Starting a new game"
         fpgtalk_command quit
 	incr ctr(move)
         after $cfg(movedelay)
@@ -694,10 +709,6 @@ while {1} {
             puts stderr "*** bad result: on new game, player is dead"
             incr ctr(err)
             continue
-        } elseif {$score} {
-            puts stderr "*** bad result: on new game, nonzero score"
-            incr ctr(err)
-            continue
         } elseif {$level != 1} {
             puts stderr "*** bad result: on new game, level is $level"
             incr ctr(err)
@@ -710,20 +721,42 @@ while {1} {
             puts stderr "*** bad result: on new game, there are no robots"
             incr ctr(err)
             continue
+        } elseif {$score} {
+            puts stderr "*** bad result: on new game, nonzero score"
+            incr ctr(err)
+            continue
         } else {
             # looks good
+            puts stderr "Level 1 robots count: [llength $robots]"
             continue
         }
     }
 
-	exit 99 ; # XXX grot
+    # Pick a move to try next.
+    if {rand() < $cfg(strategy)} {
+        # try a good move
+        set move [good_move $state]
+        set cont [expr {[llength $move] > 0 && rand() < $cfg(butfast)}]
+        puts stderr "Next move '$move' (strategic) (cont=$cont)"
+    } else {
+        # try a random move
+        if {rand() < 0.001} {
+            set move "wait"
+            set cont 0
+        } elseif {rand() < 0.01} {
+            set move "tele"
+            set cont 0
+        } else {
+            set move [list [expr {int(rand()*3)-1}] [expr {int(rand()*3)-1}]]
+            set cont [expr {rand() < 0.2}]
+        }
+        puts stderr "Next move '$move' (random) (cont=$cont)"
+    }
 
-    # 
-
+    
     # XXX
 }
 
-# XXX even when player dead, sometimes try a random move
 # XXX when going to new level or new game, report to the operator the number of robots; and check that player is alive
 
 # XXX
