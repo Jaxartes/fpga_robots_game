@@ -257,7 +257,7 @@ proc fpgatalk_get_dump {} {
     after $cfg(commdelay)
 
     # now collect the dump output as long as we have any
-    set raw [fpgatalk_eat_dump]
+    set raw [fpgatalk_eat]
     puts stderr "Dump received [string length $raw] bytes"
 
     # now try to parse it
@@ -646,6 +646,78 @@ proc good_move {state} {
 }
 
 ### Main program skeleton
+
+# initialization
+set state "" ; # dummy state to force a new game
+set ctr(move) 0 ; # number of moves performed so far
+set ctr(dump) 0 ; # number of dumps performed so far
+set ctr(err) 0 ; # number of errors detected so far (game bugs only)
+set infosec 0 ; # time in seconds we last showed info
+fpgatalk_init ; # connect to the FPGA
+
+# repeated operation
+while {1} {
+    # Give a status report, some times.
+    if {!($ctr(move) & ($ctr(move) - 1)) ||
+        [clock seconds] > $infosec + 60 ||
+        $cfg(verbose)} {
+        puts stderr "So far: $ctr(move) moves, $ctr(dump) dumps, $ctr(err) mismatches"
+        set infosec [clock seconds]
+    }
+
+    # Do we need to start a new game?
+    if {$state eq "" || (rand() < 0.4 && ![lindex $state 0])} {
+        if {$cfg(verbose)} {
+            puts stderr "Starting a new game"
+        }
+        fpgtalk_command quit
+        after $cfg(movedelay)
+        while {1} {
+            if {[catch {fpgatalk_dump} state]} {
+                puts stderr $state
+                continue
+            } else {
+                break
+            }
+        }
+        if {$state eq ""} {
+            puts stderr "*** Bogus data in dump"
+            incr ctr(err)
+            break
+        }
+
+        # check it
+        lassign $state alive score level player robots trashes
+        if {!$alive} {
+            puts stderr "*** bad result: on new game, player is dead"
+            incr ctr(err)
+            continue
+        } elseif {$score} {
+            puts stderr "*** bad result: on new game, nonzero score"
+            incr ctr(err)
+            continue
+        } elseif {$level != 1} {
+            puts stderr "*** bad result: on new game, level is $level"
+            incr ctr(err)
+            continue
+        } elseif {[llength $trashes] > 0} {
+            puts stderr "*** bad result: on new game, there is trash"
+            incr ctr(err)
+            continue
+        } elseif {[llength $robots] == 0} {
+            puts stderr "*** bad result: on new game, there are no robots"
+            incr ctr(err)
+            continue
+        } else {
+            # looks good
+            continue
+        }
+    }
+
+    # 
+
+    # XXX
+}
 
 # XXX even when player dead, sometimes try a random move
 # XXX when going to new level or new game, report to the operator the number of robots; and check that player is alive
