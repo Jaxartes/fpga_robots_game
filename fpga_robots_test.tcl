@@ -241,7 +241,7 @@ proc fpgatalk_move {dx dy cont} {
 # should be followed by a delay of $cfg(movedelay)
 proc fpgtalk_command {cmd} {
     switch -- $cmd {
-        "teleport" { fpgatalk_keymit [list 0 0x2c] }
+        "tele" { fpgatalk_keymit [list 0 0x2c] }
         "quit" { fpgatalk_keymit [list 0 0x15] }
         "wait" { fpgatalk_keymit [list 0 0x1d] }
         default { error "*** bug in tester: unknown command $cmd" }
@@ -698,9 +698,9 @@ while {1} {
             }
         }
         if {$state eq ""} {
-            puts stderr "*** Bogus data in dump"
+            puts stderr "*** Bogus data in dump (i)"
             incr ctr(err)
-            break
+            continue
         }
 
         # check it
@@ -753,10 +753,140 @@ while {1} {
         puts stderr "Next move '$move' (random) (cont=$cont)"
     }
 
-    
-    # XXX
+    # Perform the move on the FPGA.
+    if {[llength $move] > 1} {
+        # a move
+        fpgatalk_move [lindex $move 0] [lindex $move 1] $cont
+    } else {
+        # another command
+        fpgatalk_command $move
+    }
+    incr ctr(move)
+
+    # Perform the move on our internal state.  This is also where we figure
+    # out how long to delay after the move.
+    set ostate $state
+    set delays 1
+    set force_dump "" ; # if a dump is forced, this contains the reason
+    if {$move eq "tele"} {
+        # A teleport, there's no way to predict where it will go.
+        # Below, we'll do a dump and check that it was reasonable.
+        set force_dump tele
+    } elseif {$move eq "wait"} {
+        # A wait.  The player stands still until they're dead or all
+        # the robots are.
+        while {1} {
+            if {![lindex $state 0]} continue ; # player dead
+            if {![llength [lindex $state 4]]} continue ; # level cleared
+            lassign [apply_move $state 0 0 2] _ state
+            incr delays
+        }
+    } elseif {[llength $move] < 2} {
+        # Should never happen.
+        error "Internal error, questionable move '$move'"
+    } elseif {$cont} {
+        # A continuous move.  It happens until it doesn't happen.
+        while {1} {
+            lassign [apply_move $state [lindex $move 0] [lindex $move 1] 1] \
+                possible state2
+            if {!$possible} break ; # doesn't happen: can't
+            if {![lindex $state2 0]} break ; # doesn't happen: unsafe
+            # happens, and maybe another happens
+            incr delays
+            set state $state2
+        }
+    } else {
+        # Single move.  It happens or doesn't happen.
+        lassign [apply_move $state [lindex $move 0] [lindex $move 1] 1] \
+            possible state2
+        if {$possible} {
+            set state state2
+        }
+    }
+
+    # Delay, so there's time for the move to complete on the FPGA.
+    after [expr {$cfg(movedelay) * $delays}]
+
+    # Maybe perform a dump to check the result of the move
+    if {[lindex $state 0] && ![llength [lindex $state 4]]} {
+        # Player has cleared the level; we can't predict how the new
+        # level will be laid out so we need to dump.
+        set force_dump level
+    }
+    if {$force_dump eq "" && rand() < $cfg(dumps)} {
+        # Dump every now and then even if we don't strictly need to, so
+        # we can check the state against what we expect.
+        set force_dump random
+    }
+    if {$force_dump ne ""} {
+        puts stderr "Getting dump; reason: $force_dump"
+        while {1} {
+            if {[catch {fpgatalk_get_dump} dstate]} {
+                puts stderr $dstate
+                continue
+            } else {
+                incr ctr(dump)
+                break
+            }
+        }
+        if {$dstate eq ""} {
+            puts stderr "*** Bogus data in dump (ii)"
+            incr ctr(err)
+            continue
+        }
+
+        # Now that we have a dump, examine it
+        if {$force_dump ne "random"} {
+            # New random player position; report it.
+            puts stderr "Random player position: [lindex $dstate 3]"
+        }
+        if {$force_dump eq "tele"} {
+            # A teleport happened.  The new player position is
+            # unpredictable; the rest is not.
+            # XXX build substitute predicted $state
+        } elseif {$force_dump eq "level"} {
+            # The player cleared a level.  The layout of the new level
+            # is unpredictable, but not its score or level number.
+            # The number of robots is interesting; display it.
+            # XXX build substitute predicted $state
+            # XXX display number of robots
+        } elseif {$force_dump eq "random"} {
+            # This was a normal move and the result should be entirely
+            # as predicted in $state.
+        } else {
+            # This should never have happened.
+            error "Internal error, bug: bad dump reason $force_dump"
+        }
+        if {![equal_states $state $dstate]} {
+            puts stderr "*** bad result: state mismatch"
+            incr ctr(err)
+            puts stderr "  move was $move (cont=$cont)"
+            puts stderr "  dump reason was $force_dump"
+            if {$cfg(verbose)} {
+                puts stderr "  Previous state was:"
+                if {$cfg(verbose) > 1} {
+                    puts stderr [represent_state $ostate "    "]
+                } else {
+                    puts stderr "    $ostate"
+                }
+                puts stderr "  Predicted state was:"
+                if {$cfg(verbose) > 1} {
+                    puts stderr [represent_state $state "    "]
+                } else {
+                    puts stderr "    $state"
+                }
+                puts stderr "  Dumped state was:"
+                if {$cfg(verbose) > 1} {
+                    puts stderr [represent_state $dstate "    "]
+                } else {
+                    puts stderr "    $dstate"
+                }
+            }
+        }
+
+        # Since we did a dump we know what the state is.
+        set state $dstate
+    }
 }
 
-# XXX when going to new level or new game, report to the operator the number of robots; and check that player is alive
-
-# XXX
+exit 0
