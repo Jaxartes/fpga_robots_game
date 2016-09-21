@@ -836,26 +836,38 @@ while {1} {
         }
 
         # Now that we have a dump, examine it
-        if {$force_dump ne "random"} {
-            # New random player position; report it.
-            puts stderr "Random player position: [lindex $dstate 3]"
-        }
+
+        lassign $state alive score level player robots trashes
+        lassign $dstate dalive dscore dlevel dplayer drobots dtrashes
+        lassign $ostate oalive oscore olevel oplayer orobots otrashes
+
         if {$force_dump eq "tele"} {
             # A teleport happened.  The new player position is
-            # unpredictable; the rest is not.
-            # XXX build substitute predicted $state
-        } elseif {$force_dump eq "level"} {
-            # The player cleared a level.  The layout of the new level
+            # unpredictable, the rest of the state isn't.
+            # Build a substitute $state with the unpredictable parts
+            # derived from $dstate.
+
+            set state [list $oalive $oscore $olevel $dplayer $orobots $otrashes]
+            lassign [apply_move $state 0 0 1] _ state
+        }
+        if {[lindex $state 0] && ![llength [lindex $state 4]]} {
+            # By whatever means, the player has cleared the level and
+            # goes on to another one!  The layout of the new level
             # is unpredictable, but not its score or level number.
             # The number of robots is interesting; display it.
-            # XXX build substitute predicted $state
-            # XXX display number of robots
-        } elseif {$force_dump eq "random"} {
-            # This was a normal move and the result should be entirely
-            # as predicted in $state.
-        } else {
-            # This should never have happened.
-            error "Internal error, bug: bad dump reason $force_dump"
+            # And build a substitute $state with the unpredictable parts
+            # derived from $dstate.
+
+            puts stderr "New level player position: [lindex $dstate 3]"
+
+            set state [list $alive $score [expr {$level + 1}] \
+                $dplayer $drobots $dtrashes]
+        }
+        if {$force_dump ne "random"} {
+            # New random player position (not a random dump, therefore
+            # a random position - yeah, it confused me too); report it.
+
+            puts stderr "Random player position: [lindex $dstate 3]"
         }
         if {![equal_states $state $dstate]} {
             puts stderr "*** bad result: state mismatch"
