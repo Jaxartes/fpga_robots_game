@@ -30,6 +30,8 @@
 #   dumps $num - Probability $num (in range 0-1) that it requests a dump
 #       after each move.  The probability doesn't matter after certain moves,
 #       ones which leave the state uncertain ("t", "q", "w").  Default 0.5.
+#   eom - End the test on the first mismatch, instead of the default, which
+#       is to continue indefinitely, counting the mismatches.
 #   keydelay $ms - Delay in milliseconds after each keycode sent.
 #       Default 200.
 #   movedelay $ms - Delay in milliseconds after moving, per move performed.
@@ -47,6 +49,7 @@ array set cfg {
     ,butfast p butfast 0.1
     ,newgame p newgame 0.0
     ,dumps p dumps 0.5
+    ,eom + eom 0
     ,keydelay ms keydelay 200
     ,movedelay ms movedelay 200
     ,commdelay ms commdelay 200
@@ -239,7 +242,7 @@ proc fpgatalk_move {dx dy cont} {
 
 # fpgatalk_command - give a command to the FPGA, other than move
 # should be followed by a delay of $cfg(movedelay)
-proc fpgtalk_command {cmd} {
+proc fpgatalk_command {cmd} {
     switch -- $cmd {
         "tele" { fpgatalk_keymit [list 0 0x2c] }
         "quit" { fpgatalk_keymit [list 0 0x15] }
@@ -426,7 +429,7 @@ proc fpgatalk_get_dump {} {
 
 ### Misc utility functions
 
-# equal_states: Compare two states; are they equivalent?
+# equal_state: Compare two states; are they equivalent?
 proc equal_state {s1 s2} {
     # Nearly trivial because of how they're stored
     return [expr {$s1 eq $s2}]
@@ -475,6 +478,17 @@ proc represent_state {state {indent ""}} {
     }
 
     return $s
+}
+
+# Tcl 8.5 doesn't have "signum" (does any version?)
+proc ::tcl::mathfunc::signum {x} {
+    if {$x < 0} {
+        return -1
+    } elseif {$x > 0} {
+        return 1
+    } else {
+        return 0
+    }
 }
 
 ### For determining what effect a move would have 
@@ -549,9 +563,67 @@ proc apply_move {state dx dy mul} {
     if {[info exists trashes2a($pos2)] ||
         [info exists robots2a($pos2)]} {
         # a robot got to the player (or player got into trash): player dead
-        return [list 1 [list 0 $score $level $pos2 $robots2 $trashes2]]
+        return [list 1 [list 0 $score $level [list 0 0] $robots2 $trashes2]]
     }
     return [list 1 [list 1 $score2 $level $pos2 $robots2 $trashes2]]
+}
+
+# guess_teleport_dest - In one case we don't know where the player is:
+# They teleported and died, and so they didn't show up in the dump.  But
+# we still need to know their location, since it's where all the robots
+# went.  We can try to figure out where all the robots went.
+#       $ostate - state before the move
+#       $dstate - state after the move, as given by dump
+proc guess_teleport_dest {ostate dstate} {
+    global xdim ydim
+    lassign $ostate oalive oscore olevel oplayer orobots otrashes
+    lassign $dstate dalive dscore dlevel dplayer drobots dtrashes
+
+    if {$dalive} {
+        error "guess_teleport_dest called with player alive"
+    }
+
+    set us0 [clock microseconds]
+
+    # put stuff in arrays for fast searching
+    foreach drobot $drobots { set pos($drobot) 1 }
+    foreach dtrash $dtrashes { set pos($dtrash) 1 }
+
+    # There must be a robot or trash where the player teleported to, or they
+    # would have survived.  So, try all the robot & trash positions.
+    foreach pxy [concat $drobots $dtrashes] {
+        lassign $pxy px py
+        # See if $px $py could be the player's teleport destination.
+        # That's accomplished by figuring out where all the robots would
+        # move to, if that were so, and checking that each position has
+        # a robot or trash.
+        set noway 0 ; # will become 1 if $px, $py can't be player position
+        foreach rxy $orobots {
+            lassign $rxy rx ry
+            set rx2 [expr {$rx + signum($px - $rx)}]
+            set ry2 [expr {$ry + signum($py - $ry)}]
+            puts stderr [list XXX pxy= $pxy rxy= $rxy rxy2= [list $rx2 $ry2]] ; # XXX grot
+            if {![info exists pos([list $rx2 $ry2])]} {
+                set noway 1 ; # it's not this one
+                break
+            }
+        }
+        if {!$noway} {
+            # I guess $px $py works.  It's not guaranteed to be the
+            # exact position, but it works for the place where every
+            # robot went, which is what we really care about.
+            set us1 [clock microseconds]
+            puts stderr \
+                [format "guess_teleport_dest took %ld microseconds" \
+                    [expr {$us1 - $us0}]]
+            return $pxy
+        }
+    }
+
+    puts stderr "*** guess_teleport_dest found no valid teleport location"
+    puts stderr "ostate= $ostate"
+    puts stderr "dstate= $dstate"
+    error "guess_teleport_dest failed"
 }
 
 ### For determining a strategic move
@@ -670,22 +742,32 @@ set ctr(dump) 0 ; # number of dumps performed so far
 set ctr(err) 0 ; # number of errors detected so far (game bugs only)
 set infosec 0 ; # time in seconds we last showed info
 fpgatalk_init ; # connect to the FPGA
+set firstsec [clock seconds] ; # time we started
 
 # repeated operation
 while {1} {
+    if {[info exists _do_not_run_]} break
     # Give a status report, some times.
     if {!($ctr(move) & ($ctr(move) - 1)) ||
         [clock seconds] > $infosec + 60 ||
         $cfg(verbose)} {
-        puts stderr "So far: $ctr(move) moves, $ctr(dump) dumps, $ctr(err) mismatches"
         set infosec [clock seconds]
+        set sofar \
+            [format {%s moves, %s dumps, %s mismatches, in %s seconds} \
+                $ctr(move) $ctr(dump) $ctr(err) \
+                [expr {$infosec - $firstsec}]]
+        puts "So far: $sofar"
+    }
+    if {$cfg(eom) && $ctr(err) > 0} {
+        puts stderr "Exit due to combination of mismatch & 'eom' option."
+        exit 0
     }
 
     # Do we need to start a new game?
     if {$state eq "" || (rand() < 0.6 && ![lindex $state 0]) ||
         (rand() < $cfg(newgame))} {
         puts stderr "Starting a new game"
-        fpgtalk_command quit
+        fpgatalk_command quit
 	incr ctr(move)
         after $cfg(movedelay)
         while {1} {
@@ -733,7 +815,7 @@ while {1} {
     }
 
     # Pick a move to try next.
-    if {rand() < $cfg(strategy)} {
+    if {rand() < $cfg(strategy) && [lindex $state 0]} {
         # try a good move
         set move [good_move $state]
         set cont [expr {[llength $move] > 0 && rand() < $cfg(butfast)}]
@@ -776,8 +858,8 @@ while {1} {
         # A wait.  The player stands still until they're dead or all
         # the robots are.
         while {1} {
-            if {![lindex $state 0]} continue ; # player dead
-            if {![llength [lindex $state 4]]} continue ; # level cleared
+            if {![lindex $state 0]} break ; # player dead
+            if {![llength [lindex $state 4]]} break ; # level cleared
             lassign [apply_move $state 0 0 2] _ state
             incr delays
         }
@@ -799,8 +881,8 @@ while {1} {
         # Single move.  It happens or doesn't happen.
         lassign [apply_move $state [lindex $move 0] [lindex $move 1] 1] \
             possible state2
-        if {$possible} {
-            set state state2
+        if {$possible && [lindex $state2 0]} {
+            set state $state2
         }
     }
 
@@ -847,7 +929,17 @@ while {1} {
             # Build a substitute $state with the unpredictable parts
             # derived from $dstate.
 
-            set state [list $oalive $oscore $olevel $dplayer $orobots $otrashes]
+            if {$dalive} {
+                # player survived, so we know where they jumped, from the dump
+                set tplayer $dplayer
+            } else {
+                # Player died in the teleport.  So the dump includes no player
+                # position, which in turn makes it hard to figure out where
+                # the robots were supposed to go.  But from where the
+                # robots went, we can make a decent guess.
+                set tplayer [guess_teleport_dest $ostate $dstate]
+            }
+            set state [list $oalive $oscore $olevel $tplayer $orobots $otrashes]
             lassign [apply_move $state 0 0 1] _ state
         }
         if {[lindex $state 0] && ![llength [lindex $state 4]]} {
@@ -863,13 +955,13 @@ while {1} {
             set state [list $alive $score [expr {$level + 1}] \
                 $dplayer $drobots $dtrashes]
         }
-        if {$force_dump ne "random"} {
+        if {$force_dump ne "random" && $alive} {
             # New random player position (not a random dump, therefore
             # a random position - yeah, it confused me too); report it.
 
             puts stderr "Random player position: [lindex $dstate 3]"
         }
-        if {![equal_states $state $dstate]} {
+        if {![equal_state $state $dstate]} {
             puts stderr "*** bad result: state mismatch"
             incr ctr(err)
             puts stderr "  move was $move (cont=$cont)"
@@ -900,5 +992,3 @@ while {1} {
         set state $dstate
     }
 }
-
-exit 0
