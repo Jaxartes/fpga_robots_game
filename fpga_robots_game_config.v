@@ -17,3 +17,8 @@
 // needs to be 8k bits, but ISE warns me about a bug with initializing
 // 9kbit BRAMs so I'll expand it to 18kbit to work around it.
 `define FPGA_ROBOTS_BIG_KEY_TABLE 1
+
+// FPGA_ROBOTS_CORNER_DEBUG - Enable the bottom right corner of the screen
+// to hold debugging information.  This is likely of interest only at
+// development time, and not wanted when *playing* the game.
+`define FPGA_ROBOTS_CORNER_DEBUG 1

@@ -40,6 +40,9 @@
 #       in communication with the FPGA.  Default 200.
 #   device $dev - Device to contact.  Default /dev/ttyUSB1.
 #   verbose - increase verbosity of output
+#   lrcd - every time a dump happens, collect & print the 4 bits of debug
+#       data from the lower right corner; see also FPGA_ROBOTS_CORNER_DEBUG
+#       in the Verilog code.
 #   baud $baud - set baud rate of serial communication.  Default 115200.
 
 ### Read parameters from command line
@@ -55,6 +58,7 @@ array set cfg {
     ,commdelay ms commdelay 200
     ,device - device /dev/ttyUSB1
     ,verbose + verbose 0
+    ,lrcd + lrcd 0
     ,baud i baud 115200
 }
 for {set p 0} {$p < [llength $argv]} {} {
@@ -332,6 +336,11 @@ proc fpgatalk_get_dump {} {
                     set taggedvalue [expr {$code & 15}]$taggedvalue
                 }
             }
+            if {$cfg(lrcd) && !$y && !$x} {
+                puts stderr \
+                    [format "Lower right corner debug byte: 0x%x" \
+                        [expr {$code & 15}]]
+            }
         }
         if {$taggedfield ne ""} {
             # got a score keeping field!
@@ -467,12 +476,11 @@ proc represent_state {state {indent ""}} {
 
             # deal with what's sitting here
             set pos [list $x $y]
-            if {$pos eq $player} { append s "@" ; continue }
-            if {[info exists traa($pos)]} { append s "*"; continue }
-            if {[info exists roba($pos)]} { append s "+"; continue }
-
-            # nothing
-            append s "."
+            if {$alive && $pos eq $player} { append s "@" ; continue }
+            if {[info exists traa($pos)]} { append s "*" ; continue }
+            if {[info exists roba($pos)]} { append s "+" ; continue }
+            if {($x % 5) || ($y % 5)} { append s "." ; continue }
+            append s ","
         }
         append s "\n"
     }

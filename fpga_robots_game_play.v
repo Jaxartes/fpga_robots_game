@@ -75,6 +75,21 @@ module fpga_robots_game_play(
     parameter PAC_TRASH  = 2'd2;
     parameter PAC_PLAYER = 2'd3;
 
+`ifdef FPGA_ROBOTS_CORNER_DEBUG
+    // FPGA_ROBOTS_CORNER_DEBUG - Four bits of debugging information
+    // recorded in the bottom right corner of the screen memory, and
+    // retrieved as part of a dump.  Signals:
+    //      corner_debug - state of the eight bits
+    //      corner_debug_set - pulse to set any of the eight bits
+    //      corner_debug_clr - pulse to clear any of the eight bits
+    reg [3:0]corner_debug = 4'd0;
+    wire [3:0]corner_debug_set;
+    wire [3:0]corner_debug_clr;
+    always @(posedge clk)
+        corner_debug <= (corner_debug & ~corner_debug_clr) |
+                                         corner_debug_set;
+`endif // FPGA_ROBOTS_CORNER_DEBUG
+
     // Handling commands which come in through 'cmd', which are one bit
     // each, except some of the moves which are kept separately.
     reg cmd_quit = 1'd0; // quit command
@@ -205,7 +220,7 @@ module fpga_robots_game_play(
         .inc(sk_score_inc && (sk_score == sk_high))
     );
 
-    // Allow several to be added, one per clock cycle.
+    // Allow several points to be added, one per clock cycle.
     // Assumes either sk_score_add or sk_score_acc is always zero, and
     // that no backlog accumulates.  These assumptions are borne up by
     // the way it's used here:  Up to four points (two robots times two
@@ -277,6 +292,14 @@ module fpga_robots_game_play(
                     skw_mask = { 1'd1, skw_mask_saved[5:1] };
                     skw_count = skw_count_saved - 3'd1;
                 end
+`ifdef FPGA_ROBOTS_CORNER_DEBUG
+                else if (sml_x_max && sml_y_max) begin
+                    // write debug data into lower right corner of screen memory
+                    skw_data = { 4'd0, corner_debug };
+                    skw_mask = 6'd0;
+                    skw_count = 3'd1;
+                end
+`endif // FPGA_ROBOTS_CORNER_DEBUG
             endcase
         end
     end
@@ -1043,4 +1066,10 @@ module fpga_robots_game_play(
     // XXX attn when player dies
     // XXX attn when a single move command fails because player would die
 
+`ifdef FPGA_ROBOTS_CORNER_DEBUG
+    // Logic for putting eight bits of debug in the lower right corner.
+    wire [3:0]corner_debug_use = player_dead ? 4'd9 : 4'd7;
+    assign corner_debug_clr = rst ? 4'd15 : ~corner_debug_use;
+    assign corner_debug_set = corner_debug_use;
+`endif // FPGA_ROBOTS_CORNER_DEBUG
 endmodule
