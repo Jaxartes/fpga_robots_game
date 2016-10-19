@@ -32,6 +32,7 @@
 #       ones which leave the state uncertain ("t", "q", "w").  Default 0.5.
 #   eom - End the test on the first mismatch, instead of the default, which
 #       is to continue indefinitely, counting the mismatches.
+#   nocont - don't do any continuous moves
 #   keydelay $ms - Delay in milliseconds after each keycode sent.
 #       Default 200.
 #   movedelay $ms - Delay in milliseconds after moving, per move performed.
@@ -52,6 +53,7 @@ array set cfg {
     ,butfast p butfast 0.1
     ,newgame p newgame 0.0
     ,dumps p dumps 0.5
+    ,nocont + nocont 0
     ,eom + eom 0
     ,keydelay ms keydelay 200
     ,movedelay ms movedelay 200
@@ -826,7 +828,8 @@ while {1} {
     if {rand() < $cfg(strategy) && [lindex $state 0]} {
         # try a good move
         set move [good_move $state]
-        set cont [expr {[llength $move] > 0 && rand() < $cfg(butfast)}]
+        set cont [expr {[llength $move] > 0 && rand() < $cfg(butfast) && \
+                        !$cfg(nocont)}]
         puts stderr "Next move '$move' (strategic) (cont=$cont)"
     } else {
         # try a random move
@@ -838,7 +841,7 @@ while {1} {
             set cont 0
         } else {
             set move [list [expr {int(rand()*3)-1}] [expr {int(rand()*3)-1}]]
-            set cont [expr {rand() < 0.2}]
+            set cont [expr {rand() < 0.2 && !$cfg(nocont)}]
         }
         puts stderr "Next move '$move' (random) (cont=$cont)"
     }

@@ -76,18 +76,10 @@ module fpga_robots_game_play(
     parameter PAC_PLAYER = 2'd3;
 
 `ifdef FPGA_ROBOTS_CORNER_DEBUG
-    // FPGA_ROBOTS_CORNER_DEBUG - Four bits of debugging information
-    // recorded in the bottom right corner of the screen memory, and
-    // retrieved as part of a dump.  Signals:
-    //      corner_debug - state of the eight bits
-    //      corner_debug_set - pulse to set any of the eight bits
-    //      corner_debug_clr - pulse to clear any of the eight bits
+    // FPGA_ROBOTS_CORNER_DEBUG - 4 bits of debugging information
+    // which are transmitted in place of the bottom right corner of the
+    // screen memory during a dump.
     reg [3:0]corner_debug = 4'd0;
-    wire [3:0]corner_debug_set;
-    wire [3:0]corner_debug_clr;
-    always @(posedge clk)
-        corner_debug <= (corner_debug & ~corner_debug_clr) |
-                                         corner_debug_set;
 `endif // FPGA_ROBOTS_CORNER_DEBUG
 
     // Handling commands which come in through 'cmd', which are one bit
@@ -292,14 +284,6 @@ module fpga_robots_game_play(
                     skw_mask = { 1'd1, skw_mask_saved[5:1] };
                     skw_count = skw_count_saved - 3'd1;
                 end
-`ifdef FPGA_ROBOTS_CORNER_DEBUG
-                else if (sml_x_max && sml_y_max) begin
-                    // write debug data into lower right corner of screen memory
-                    skw_data = { 4'd0, corner_debug };
-                    skw_mask = 6'd0;
-                    skw_count = 3'd1;
-                end
-`endif // FPGA_ROBOTS_CORNER_DEBUG
             endcase
         end
     end
@@ -397,6 +381,12 @@ module fpga_robots_game_play(
             dump_tx_stb = 1'd1;
         end else if (sml_ph2) begin
             // single byte's worth of data
+`ifdef FPGA_ROBOTS_CORNER_DEBUG
+            if (sml_x_max && sml_y_max)
+                // 48-63: 4 bits, not from memory, but from corner_debug
+                dump_tx_dat = { 4'd3, corner_debug[3:0] };
+            else
+`endif // FPGA_ROBOTS_CORNER_DEBUG
             if (sml_rgt && tm_red[7])
                 // 64-127: 6 bits data, tagged scoreboard information
                 dump_tx_dat = { 2'd1, tm_red[6:5], tm_red[3:0] };
@@ -994,7 +984,7 @@ module fpga_robots_game_play(
                 // It's going through states the first time, and it turns
                 // out it can't continue.
                 sml_opcode_next = OPC_IDLE;
-                mcmd_clear_pending = 1'd1;
+                if (sml_single) mcmd_clear_pending = 1'd1;
             end
         end
         OPC_MV_COPYDOWN: begin
@@ -1062,14 +1052,21 @@ module fpga_robots_game_play(
     // Logic for getting the player's attention
     assign want_attention = want_attention_f2; // XXX add more
 
+    reg [6:0]move_player_x_d1 = 7'd0;
+    reg [6:0]move_player_y_d1 = 7'd0;
+    always @(posedge clk) move_player_x_d1 <= move_player_x;
+    always @(posedge clk) move_player_y_d1 <= move_player_y;
+
+    assign debug_event = (sml_ph2 || sml_ph4) &&
+            (!sml_rgt) && (sml_opcode == OPC_MV_DOMOVE) &&
+            ((move_player_x_d1 != move_player_x) ||
+             (move_player_y_d1 != move_player_y));
+
+    always @(posedge clk)
+        if (debug_event) corner_debug <= corner_debug + 1'd1;
+
     // XXX attn when a move command comes in but is rejected (cmd_any && (mcmd_pending_any || player_dead)
     // XXX attn when player dies
     // XXX attn when a single move command fails because player would die
 
-`ifdef FPGA_ROBOTS_CORNER_DEBUG
-    // Logic for putting eight bits of debug in the lower right corner.
-    wire [3:0]corner_debug_use = player_dead ? 4'd9 : 4'd7;
-    assign corner_debug_clr = rst ? 4'd15 : ~corner_debug_use;
-    assign corner_debug_set = corner_debug_use;
-`endif // FPGA_ROBOTS_CORNER_DEBUG
 endmodule
