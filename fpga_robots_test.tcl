@@ -33,6 +33,8 @@
 #   eom - End the test on the first mismatch, instead of the default, which
 #       is to continue indefinitely, counting the mismatches.
 #   nocont - don't do any continuous moves
+#   3to1 - when coming up with "strategic" moves, prefer ones that cause
+#       three robots to collide into one place
 #   keydelay $ms - Delay in milliseconds after each keycode sent.
 #       Default 200.
 #   movedelay $ms - Delay in milliseconds after moving, per move performed.
@@ -54,6 +56,7 @@ array set cfg {
     ,newgame p newgame 0.0
     ,dumps p dumps 0.5
     ,nocont + nocont 0
+    ,3to1 + 3to1 0
     ,eom + eom 0
     ,keydelay ms keydelay 200
     ,movedelay ms movedelay 200
@@ -503,6 +506,26 @@ proc ::tcl::mathfunc::signum {x} {
 
 ### For determining what effect a move would have 
 
+# robot_move: Figure out where a robot would move, toward the player
+proc robot_move {from player} {
+    lassign $from rx ry
+    lassign $player px py
+
+    set rx2 $rx
+    set ry2 $ry
+    if {$px < $rx} {
+        incr rx2 -1
+    } elseif {$px > $rx} {
+        incr rx2 1
+    }
+    if {$py < $ry} {
+        incr ry2 -1
+    } elseif {$py > $ry} {
+        incr ry2 1
+    }
+    return [list $rx2 $ry2]
+}
+
 # apply_move: Apply a single move to a game state, returning a new game state.
 # This doesn't handle random moves or moves that go to a new level, etc.
 # Those require special handling.
@@ -542,19 +565,7 @@ proc apply_move {state dx dy mul} {
     foreach robot $robots {
         # from robot's old position, figure out new position
         lassign $robot rx ry
-        set rx2 $rx
-        set ry2 $ry
-        if {$px2 < $rx} {
-            incr rx2 -1
-        } elseif {$px2 > $rx} {
-            incr rx2 1
-        }
-        if {$py2 < $ry} {
-            incr ry2 -1
-        } elseif {$py2 > $ry} {
-            incr ry2 1
-        }
-        set robot2 [list $rx2 $ry2]
+        set robot2 [robot_move $robot $pos2]
         if {![info exists robots2a($robot2)]} {
             set robots2a($robot2) 0
         }
@@ -646,7 +657,12 @@ proc guess_teleport_dest {ostate dstate} {
 # This logic is not very efficient, but that's ok.  Running on a gigahertz
 # range CPU, to test a low-cost FPGA implementation of a minicomputer game
 # from the 1980s, not much is needed.
+#
+# Also, this strategy isn't very good.  Not sure I care, this script is
+# just for testing after all.
 proc good_move {state} {
+    global cfg
+
     lassign $state alive score level player robots trashes
 
     if {!$alive} {
@@ -715,9 +731,27 @@ proc good_move {state} {
         #       +2 points per trash
         #       -1 point per unit of smallest dimension robots occupy
         #       +1 point per unit of distance from nearest robot
+        # The "3to1" option changes this with
+        #       +5 points per new trash formed by three robots together
         set goodness 0
         incr goodness [expr {-3 * [llength $robots2]}]
         incr goodness [expr {2 * [llength $trashes2]}]
+        if {$cfg(3to1)} {
+            foreach trash $trashes {
+                set otra($trash) 1
+            }
+            foreach robot $robots {
+                set robot2 [robot_move $robot $player2]
+                if {![info exists robto($robot2)]} {
+                    set robto($robot2) 0
+                }
+                incr robto($robot2)
+            }
+            foreach p [array names robto] {
+                if {[info exists otra($p)]} continue ; # old trash, new robots
+                if {$robto($p) == 3} { incr goodness 5 }
+            }
+        }
         set minx 999 ; set miny 999 ; set maxx -999 ; set maxy -999
         set mind 999
         foreach robot $robots2 {

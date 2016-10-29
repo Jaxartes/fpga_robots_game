@@ -191,44 +191,22 @@ module fpga_robots_game_play(
     digit2 sk_level_digit2(
         .clk(clk), .rst(rst || score_reset),
         .data(sk_level), .mask(sk_level_mask),
-        .inc(sk_level_inc)
+        .inc({ 2'd0, sk_level_inc })
     );
     wire [23:0]sk_score; // 6-digit current score
     wire [23:0]sk_high; // 6-digit high score
     wire [5:0]sk_score_mask; // hide digits
     wire [5:0]sk_high_mask;
-    wire sk_score_inc; // pulse to increment
+    reg [2:0]sk_score_add; // value to add to score
     digit6 sk_score_digit6(
         .clk(clk), .rst(rst || score_reset),
-        .data(sk_score), .mask(sk_score_mask), .inc(sk_score_inc)
+        .data(sk_score), .mask(sk_score_mask), .inc(sk_score_add)
     );
-    digit6 sk_high_digit6(
+    digit6max sk_high_digit6(
         .clk(clk), .rst(1'd0),
-        .data(sk_high), .mask(sk_high_mask),
-        // If the score increases, and it was equal to the high score,
-        // the high score increases.  That's any easier way to keep the
-        // high score up to date, than comparing the two scores and
-        // copying one.
-        .inc(sk_score_inc && (sk_score == sk_high))
+        .odata(sk_high), .omask(sk_high_mask),
+        .idata(sk_score), .imask(sk_score_mask)
     );
-
-    // Allow several points to be added, one per clock cycle.
-    // Assumes either sk_score_add or sk_score_acc is always zero, and
-    // that no backlog accumulates.  These assumptions are borne up by
-    // the way it's used here:  Up to four points (two robots times two
-    // points each) in a five clock period.
-    //      Input: sk_score_add, points to add
-    //      Output: sk_score_inc, add a point a clock cycle or not
-    reg [2:0]sk_score_acc = 3'd0;
-    reg [2:0]sk_score_add;
-    always @(posedge clk)
-        if (rst || score_reset)
-            sk_score_acc <= 3'd0;
-        else if (sk_score_acc)
-            sk_score_acc <= sk_score_acc - 3'd1;
-        else if (sk_score_add)
-            sk_score_acc <= sk_score_add;
-    assign sk_score_inc = |sk_score_acc;
 
     // And the logic for writing those scores into memory.  Which happens
     // in many (not all) of the opcodes in the state machine.
@@ -1052,15 +1030,7 @@ module fpga_robots_game_play(
     // Logic for getting the player's attention
     assign want_attention = want_attention_f2; // XXX add more
 
-    reg [6:0]move_player_x_d1 = 7'd0;
-    reg [6:0]move_player_y_d1 = 7'd0;
-    always @(posedge clk) move_player_x_d1 <= move_player_x;
-    always @(posedge clk) move_player_y_d1 <= move_player_y;
-
-    assign debug_event = (sml_ph2 || sml_ph4) &&
-            (!sml_rgt) && (sml_opcode == OPC_MV_DOMOVE) &&
-            ((move_player_x_d1 != move_player_x) ||
-             (move_player_y_d1 != move_player_y));
+    assign debug_event = (sk_score_add >= 3'd4);
 
     always @(posedge clk)
         if (debug_event) corner_debug <= corner_debug + 1'd1;

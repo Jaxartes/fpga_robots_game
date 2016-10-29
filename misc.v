@@ -323,122 +323,124 @@ module top( );
 endmodule
 `endif
 
-// digit() - Keep track of numeric values 0-9 and allow them to be incremented
-module digit(
-    input clk, // system clock (rising edge active)
-    input rst, // system reset signal (active high synchronous)
-    output reg [3:0]digit = 4'd0, // the digit value
-    input inc, // pulses each time it should increment
-    output reg nine // indicates it's at nine, and another 'inc' pulse
-                    // will cause it to wrap around
+// decadd() - Add a value (0-7) to a binary coded decimal digit (0-9) and
+// compute a new decimal digit and a carry value.
+module decadd(
+    input [3:0]idig, // input digit 0-9
+    input [2:0]iadd, // value to add, 0-7
+    output [3:0]odig, // output digit 0-9
+    output ocry // output carry
 );
-    always @(posedge clk)
-        if (rst) begin
-            digit <= 4'd0;
-            nine <= 1'd0;
-        end else begin
-            if (inc) begin
-                nine <= 1'd0;
-                case(digit)
-                4'd0: digit <= 4'd1;
-                4'd1: digit <= 4'd2;
-                4'd2: digit <= 4'd3;
-                4'd3: digit <= 4'd4;
-                4'd4: digit <= 4'd5;
-                4'd5: digit <= 4'd6;
-                4'd6: digit <= 4'd7;
-                4'd7: digit <= 4'd8;
-                4'd8: begin digit <= 4'd9; nine <= 1'd1; end
-                default: digit <= 4'd0;
-                endcase
-            end
-        end
+    // binary addition; result bsum, 0-16
+    wire [4:0]bsum = { 1'd0, idig } + { 2'd0, iadd };
+
+    // digit value if that would wrap around
+    wire [4:0]less10 = bsum - 5'd10;
+
+    // pick one
+    assign ocry = !(less10[4]);
+    assign odig = less10[4] ? bsum[3:0] : less10[3:0];
 endmodule
 
-// digit2() - a 1- or 2-digit number
+// digit2() - A 1- or 2-digit number which can be reset to zero or
+// incremented by up to 7.
 module digit2(
     input clk, // system clock (rising edge active)
     input rst, // system reset signal (active high synchronous)
     output [7:0]data, // digit values
     output reg [1:0]mask = 2'd2, // which digits aren't even shown
-    input inc // trigger adding one to it
+    input [2:0]inc // trigger adding one to it
 );
-    wire wouldcarry;
-    digit rgt(
-        .clk(clk), .rst(rst),
-        .digit(data[3:0]), .inc(inc), .nine(wouldcarry)
-    );
-    digit lft(
-        .clk(clk), .rst(rst),
-        .digit(data[7:4]), .inc(wouldcarry && inc)
-    );
+    reg [3:0]dlft = 4'd0; // digit values
+    reg [3:0]drgt = 4'd0;
+    wire [3:0]dlft2;
+    wire [3:0]drgt2;
+    wire carry;
+
+    always @(posedge clk) dlft <= rst ? 4'd0 : dlft2;
+    always @(posedge clk) drgt <= rst ? 4'd0 : drgt2;
     always @(posedge clk)
         if (rst)
-            mask <= 2'd2; // right digit shows, not left
-        else if (wouldcarry && inc)
-            mask <= 2'd0; // now they both show: we've reached 10
+            mask <= 2'd2; // left digit invisible: 0
+        else if (carry)
+            mask <= 2'd0; // two digits
+
+    decadd argt(.idig(drgt), .iadd(inc),
+                .odig(drgt2), .ocry(carry));
+    decadd alft(.idig(dlft), .iadd({ 2'd0, carry }),
+                .odig(dlft2)); // alft.ocry intentionally ignored
+
+    assign data = { dlft, drgt };
 endmodule
 
-// digit6() - an up to 6-digit number
+// digit6() - an up to 6-digit number which can be reset to zero or
+// incremented by up to 7.
 module digit6(
     input clk, // system clock (rising edge active)
     input rst, // system reset signal (active high synchronous)
-    output [23:0]data, // digit values
+    output reg [23:0]data = 24'd0, // digit values
     output reg [5:0]mask = 6'd62, // which digits aren't even shown
-    input inc // trigger adding one to it
+    input [2:0]inc // add to it
 );
-    wire [4:0]nines;
-    wire [5:1]carries;
+    wire [23:0]data2; // digits after addition
+    wire [4:0]carry; // carry out of each digit except last
 
-    // do the digits, in parallel
-    digit d1(
-        .clk(clk), .rst(rst), .digit(data[3:0]),
-        .inc(inc), .nine(nines[0])
-    );
-    digit d10(
-        .clk(clk), .rst(rst), .digit(data[7:4]),
-        .inc(carries[1]), .nine(nines[1])
-    );
-    digit d100(
-        .clk(clk), .rst(rst), .digit(data[11:8]),
-        .inc(carries[2]), .nine(nines[2])
-    );
-    digit d1k(
-        .clk(clk), .rst(rst), .digit(data[15:12]),
-        .inc(carries[3]), .nine(nines[3])
-    );
-    digit d10k(
-        .clk(clk), .rst(rst), .digit(data[19:16]),
-        .inc(carries[4]), .nine(nines[4])
-    );
-    digit d100k(
-        .clk(clk), .rst(rst), .digit(data[23:20]),
-        .inc(carries[5])
-    );
+    // this carry chain here is ugly and slow
+    decadd a0(.idig(data[3:0]), .iadd(inc),
+              .odig(data2[3:0]), .ocry(carry[0]));
+    decadd a1(.idig(data[7:4]), .iadd({ 2'd0, carry[0] }),
+              .odig(data2[7:4]), .ocry(carry[1]));
+    decadd a2(.idig(data[11:8]), .iadd({ 2'd0, carry[1] }),
+              .odig(data2[11:8]), .ocry(carry[2]));
+    decadd a3(.idig(data[15:12]), .iadd({ 2'd0, carry[2] }),
+              .odig(data2[15:12]), .ocry(carry[3]));
+    decadd a4(.idig(data[19:16]), .iadd({ 2'd0, carry[3] }),
+              .odig(data2[19:16]), .ocry(carry[4]));
+    decadd a5(.idig(data[23:20]), .iadd({ 2'd0, carry[4] }),
+              .odig(data2[23:20])); // a5.ocry intentionally ignored
 
-    // compute the carry from one to another
-    assign carries[1] = nines[0] && inc;
-    assign carries[2] = nines[0] && nines[1] && inc;
-    assign carries[3] = nines[0] && nines[1] && nines[2] && inc;
-    wire ln = nines[0] && nines[1] && nines[2] && nines[3];
-    assign carries[4] = ln && inc;
-    assign carries[5] = ln && nines[4] && inc;
-
-    // deal with digits that aren't there, until they are there
-    genvar g;
-    generate
-        for (g = 1; g < 6; g = g + 1) begin : dodigmask
-            always @(posedge clk)
-                if (rst)
-                    mask[g] <= 1'd1; // digit starts out hidden
-                else if (carries[g])
-                    mask[g] <= 1'd0; // but appears when it's nonzero
+    always @(posedge clk) data <= rst ? 24'd0 : data2;
+    always @(posedge clk)
+        if (rst)
+            mask <= 6'd62; // only the rightmost digit is visible at first
+        else begin
+            if (carry[0]) mask[1] <= 1'd0;
+            if (carry[1]) mask[2] <= 1'd0;
+            if (carry[2]) mask[3] <= 1'd0;
+            if (carry[3]) mask[4] <= 1'd0;
+            if (carry[4]) mask[5] <= 1'd0;
         end
-    endgenerate
+endmodule
+
+// digit6max() - for keeping high scores, this keeps six digit values which
+// can be reset to zero, or set to the given input if the given input is
+// greater than the current value
+module digit6max(
+    input clk, // system clock (rising edge active)
+    input rst, // system reset signal (active high synchronous)
+    output reg [23:0]odata = 24'd0, // digit values
+    output reg [5:0]omask = 6'd62, // which digits aren't even shown
+    input [23:0]idata, // input digits
+    input [5:0]imask // input digit mask
+);
+    always @(posedge clk)
+        if (rst) begin
+            odata <= 24'd0; // zero
+            omask <= 6'd62; // only one digit is visible: zero
+        end else if (idata > odata) begin
+            // Note, that above comparison is a *binary* comparison even
+            // though what we really want to compare are *decimal* values.
+            // But the results are the same here.
+            odata <= idata;
+            omask <= imask;
+        end
 endmodule
 
 `ifdef TEST_DIGITS
-// This code is to be run in Icarus Verilog to test digit*()
+// This code is to be run in Icarus Verilog to test digit*().  It works
+// by generating pseudorandom values to add to the counters, and displays
+// the addition and the results.  It doesn't test reset, which should
+// be simple.
 module top( );
     // clock
     reg clk = 1'd0;
@@ -447,69 +449,48 @@ module top( );
     // reset
     reg rst = 1'd1;
     initial begin
-        #100;
-        rst <= 1'd0;
-        #1500;
-        rst <= 1'd1;
-        #100;
+        #101;
         rst <= 1'd0;
     end
 
+    // what to add
+    reg [19:0]addend = 20'd1;
+    wire [19:0]addend2;
+    lfsr_20_3 prng_addend(.in(addend), .out(addend2));
+    always @(posedge clk) addend <= rst ? 20'd1 : addend2;
+    wire [2:0]add = addend[2:0];
+
     // the digits
-    reg trigger = 1'd0;
-    wire [3:0]d1digits;
     wire [1:0]d2mask;
     wire [7:0]d2digits;
     wire [5:0]d6mask;
     wire [23:0]d6digits;
-    digit d1(
-        .clk(clk), .rst(rst), .digit(d1digits),
-        .inc(trigger)
-    );
     digit2 d2(
-        .clk(clk), .rst(rst), .data(d2digits), .mask(d2mask),
-        .inc(trigger)
+        .clk(clk), .rst(rst), .data(d2digits), .mask(d2mask), .inc(add)
     );
     digit6 d6(
-        .clk(clk), .rst(rst), .data(d6digits), .mask(d6mask),
-        .inc(trigger)
+        .clk(clk), .rst(rst), .data(d6digits), .mask(d6mask), .inc(add)
     );
 
-    // operation, while showing the results, and triggering at varying
-    // intervals
-    integer i, j;
-    initial forever begin
-        for (i = 0; i < 4; i = i + 1) begin
-            // increment
-            @(posedge clk);
-            trigger <= 1'd1;
-            @(negedge clk);
-            @(posedge clk);
-            trigger <= 1'd0;
-            @(negedge clk);
-            // delay
-            for (j = 0; j < i; j = j + 1) begin
-                @(posedge clk);
-                @(negedge clk);
-            end
-            // display
-            $write("%c ", d1digits + 48);
-            for (j = 1; j >= 0; j = j - 1) begin
-                if (d2mask[j])
-                    $write(" ");
-                else
-                    $write("%c", 48 + ((d2digits >> (4 * j)) & 15));
-            end
-            $write(" ");
-            for (j = 5; j >= 0; j = j - 1) begin
-                if (d6mask[j])
-                    $write(" ");
-                else
-                    $write("%c", 48 + ((d6digits >> (4 * j)) & 15));
-            end
-            $display("; @%t", $time);
-        end
-    end
+    // a simply binary accumulator
+    reg [63:0]accum = 64'd0;
+    always @(posedge clk)
+        if (rst)
+            accum <= 64'd0;
+        else
+            accum <= accum + add;
 
+    // show results
+    always @(negedge clk)
+        $display("%c%c / %c%c%c%c%c%c / %d ; add %d",
+                 d2mask[1] ? 8'd32 : { 4'd3, d2digits[7:4] },
+                 d2mask[0] ? 8'd32 : { 4'd3, d2digits[3:0] },
+                 d6mask[5] ? 8'd32 : { 4'd3, d6digits[23:20] },
+                 d6mask[4] ? 8'd32 : { 4'd3, d6digits[19:16] },
+                 d6mask[3] ? 8'd32 : { 4'd3, d6digits[15:12] },
+                 d6mask[2] ? 8'd32 : { 4'd3, d6digits[11:8] },
+                 d6mask[1] ? 8'd32 : { 4'd3, d6digits[7:4] },
+                 d6mask[0] ? 8'd32 : { 4'd3, d6digits[3:0] },
+                 accum, add);
 endmodule
 `endif // TEST_DIGITS
