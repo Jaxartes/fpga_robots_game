@@ -815,10 +815,11 @@ module fpga_robots_game_play(
                 cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
                 move_player_happens = 1'd1;
             end else if (cmd_fns[0]) begin // F1: new level
-                // XXX get rid of or replace this before release
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
+`ifdef FPGA_ROBOTS_F1_LEVEL
                 sk_level_inc = 1'd1;
                 sml_opcode_next = OPC_NEWLEVEL;
+`endif // FPGA_ROBOTS_F1_LEVEL
             end else if (cmd_fns[1]) begin // F2: attention (beep & flash)
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
                 want_attention_f2 = 1'd1; // signal for a beep

@@ -3,6 +3,8 @@
 
 // Various "defines" which control the Verilog code
 
+// XXX go through and adjust these for real use, when done testing & debugging
+
 // FPGA_ROBOTS_ANIMATE - `define this in order to enable animated graphics
 // in the play area.  Without it, the game might be more boring, but it'll
 // take up less logic space on the FPGA.
@@ -22,3 +24,7 @@
 // to hold debugging information.  This is likely of interest only at
 // development time, and not wanted when *playing* the game.
 `define FPGA_ROBOTS_CORNER_DEBUG 1
+
+// FPGA_ROBOTS_F1_LEVEL - Enable a debug/cheat feature: The F1 key will
+// result in going to a new level.
+`define FPGA_ROBOTS_F1_LEVEL 1

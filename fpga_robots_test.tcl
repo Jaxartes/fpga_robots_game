@@ -18,15 +18,19 @@
 # Positions in turn are each represented as a list with two elements,
 # 0-based X & Y coordinates.  Position lists are sorted.
 
-# XXX work in progress
-
 # Parameters:
 #   strategy $num - Probability $num (in range 0-1) that it chooses
 #       a "strategic" move instead of a "random" one, each time.  Default 0.5.
 #   butfast $num - Probability $num (in range 0-1) that, when doing a
 #       "strategic" move, it just continues it as long as it can.  Default 0.1.
+#   teles $num - Probability $num (in range 0-1) that, when doing a
+#       "random" move, it teleports.  Default 0.01.
 #   newgame $num - Probability $num (in range 0-1) of starting a new game
 #       even when you don't need one.  Default 0.0.
+#   newgamelevel $num - When doing a new game (see newgame), probability
+#       (repeated, in range 0-1) of going to a new level using F1.
+#       To work this requires FPGA_ROBOTS_F1_LEVEL be defined in
+#       fpga_robots_game_config.v.  Default 0.0.
 #   dumps $num - Probability $num (in range 0-1) that it requests a dump
 #       after each move.  The probability doesn't matter after certain moves,
 #       ones which leave the state uncertain ("t", "q", "w").  Default 0.5.
@@ -53,7 +57,9 @@
 array set cfg {
     ,strategy p strategy 0.5
     ,butfast p butfast 0.1
+    ,teles p teles 0.01
     ,newgame p newgame 0.0
+    ,newgamelevel p newgamelevel 0.0
     ,dumps p dumps 0.5
     ,nocont + nocont 0
     ,3to1 + 3to1 0
@@ -256,6 +262,9 @@ proc fpgatalk_command {cmd} {
         "tele" { fpgatalk_keymit [list 0 0x2c] }
         "quit" { fpgatalk_keymit [list 0 0x15] }
         "wait" { fpgatalk_keymit [list 0 0x1d] }
+        "f1"   { fpgatalk_keymit [list 0 0x05] }
+        "f2"   { fpgatalk_keymit [list 0 0x06] }
+        "f3"   { fpgatalk_keymit [list 0 0x04] }
         default { error "*** bug in tester: unknown command $cmd" }
     }
 }
@@ -589,64 +598,6 @@ proc apply_move {state dx dy mul} {
     return [list 1 [list 1 $score2 $level $pos2 $robots2 $trashes2]]
 }
 
-# guess_teleport_dest - In one case we don't know where the player is:
-# They teleported and died, and so they didn't show up in the dump.  But
-# we still need to know their location, since it's where all the robots
-# went.  We can try to figure out where all the robots went.
-#       $ostate - state before the move
-#       $dstate - state after the move, as given by dump
-proc guess_teleport_dest {ostate dstate} {
-    global xdim ydim
-    lassign $ostate oalive oscore olevel oplayer orobots otrashes
-    lassign $dstate dalive dscore dlevel dplayer drobots dtrashes
-
-    if {$dalive} {
-        error "guess_teleport_dest called with player alive"
-    }
-
-    set us0 [clock microseconds]
-
-    # put stuff in arrays for fast searching
-    foreach drobot $drobots { set pos($drobot) 1 }
-    foreach dtrash $dtrashes { set pos($dtrash) 1 }
-
-    # There must be a robot or trash where the player teleported to, or they
-    # would have survived.  So, try all the robot & trash positions.
-    foreach pxy [concat $drobots $dtrashes] {
-        lassign $pxy px py
-        # See if $px $py could be the player's teleport destination.
-        # That's accomplished by figuring out where all the robots would
-        # move to, if that were so, and checking that each position has
-        # a robot or trash.
-        set noway 0 ; # will become 1 if $px, $py can't be player position
-        foreach rxy $orobots {
-            lassign $rxy rx ry
-            set rx2 [expr {$rx + signum($px - $rx)}]
-            set ry2 [expr {$ry + signum($py - $ry)}]
-            puts stderr [list XXX pxy= $pxy rxy= $rxy rxy2= [list $rx2 $ry2]] ; # XXX grot
-            if {![info exists pos([list $rx2 $ry2])]} {
-                set noway 1 ; # it's not this one
-                break
-            }
-        }
-        if {!$noway} {
-            # I guess $px $py works.  It's not guaranteed to be the
-            # exact position, but it works for the place where every
-            # robot went, which is what we really care about.
-            set us1 [clock microseconds]
-            puts stderr \
-                [format "guess_teleport_dest took %ld microseconds" \
-                    [expr {$us1 - $us0}]]
-            return $pxy
-        }
-    }
-
-    puts stderr "*** guess_teleport_dest found no valid teleport location"
-    puts stderr "ostate= $ostate"
-    puts stderr "dstate= $dstate"
-    error "guess_teleport_dest failed"
-}
-
 ### For determining a strategic move
 
 # good_move - Given a state of the game, figure out a good next move.
@@ -814,6 +765,16 @@ while {1} {
         fpgatalk_command quit
 	incr ctr(move)
         after $cfg(movedelay)
+        set expectlevel 1
+
+        while {rand() < $cfg(newgamelevel)} {
+            puts stderr "Advancing level using F1"
+            fpgatalk_command f1
+            incr ctr(move)
+            after $cfg(movedelay)
+            incr expectlevel
+        }
+
         while {1} {
             if {[catch {fpgatalk_get_dump} state]} {
                 puts stderr $state
@@ -835,8 +796,8 @@ while {1} {
             puts stderr "*** bad result: on new game, player is dead"
             incr ctr(err)
             continue
-        } elseif {$level != 1} {
-            puts stderr "*** bad result: on new game, level is $level"
+        } elseif {$expectlevel != $level} {
+            puts stderr "*** bad result: on new game, level is $level, expected $expectlevel"
             incr ctr(err)
             continue
         } elseif {[llength $trashes] > 0} {
@@ -853,7 +814,7 @@ while {1} {
             continue
         } else {
             # looks good
-            puts stderr "Level 1 robots count: [llength $robots]"
+            puts stderr "Level $level robots count: [llength $robots]"
             continue
         }
     }
@@ -867,11 +828,11 @@ while {1} {
         puts stderr "Next move '$move' (strategic) (cont=$cont)"
     } else {
         # try a random move
-        if {rand() < 0.001} {
-            set move "wait"
-            set cont 0
-        } elseif {rand() < 0.01} {
+        if {rand() < $cfg(teles)} {
             set move "tele"
+            set cont 0
+        } elseif {rand() < 0.001} {
+            set move "wait"
             set cont 0
         } else {
             set move [list [expr {int(rand()*3)-1}] [expr {int(rand()*3)-1}]]
@@ -977,15 +938,53 @@ while {1} {
             if {$dalive} {
                 # player survived, so we know where they jumped, from the dump
                 set tplayer $dplayer
+                set state \
+                    [list $oalive $oscore $olevel $tplayer $orobots $otrashes]
+                lassign [apply_move $state 0 0 1] _ state
+            } elseif {!$oalive} {
+                # Dead players can't teleport.
+                set state $ostate
+                lassign $state alive score level player robots trashes
             } else {
                 # Player died in the teleport.  So the dump includes no player
                 # position, which in turn makes it hard to figure out where
-                # the robots were supposed to go.  But from where the
-                # robots went, we can make a decent guess.
-                set tplayer [guess_teleport_dest $ostate $dstate]
+                # the robots were supposed to go.  Solve this by the brute
+                # force method: try all possible places the player could
+                # have jumped to, and see if any of them produce
+                # matching results.
+                set foundone 0
+                set telescan_start [clock microseconds]
+                for {set x 0} {$x < $xdim && !$foundone} {incr x} {
+                    for {set y 0} {$y < $ydim && !$foundone} {incr y} {
+                        set tplayer [list $x $y]
+                        set tstate \
+                            [list $oalive $oscore $olevel $tplayer \
+                                $orobots $otrashes]
+                        lassign [apply_move $tstate 0 0 1] moved tstate
+                        if {$moved && [equal_state $dstate $tstate]} {
+                            set foundone 1
+                            set state $tstate
+                            lassign $state \
+                                alive score level player robots trashes
+                        }
+                    }
+                }
+                if {$cfg(verbose) > 0} {
+                    puts stderr "Tried all possible teleport destinations in [expr {[clock microseconds] - $telescan_start}] microseconds."
+                }
+                if {$foundone} {
+                    if {$cfg(verbose) > 0} {
+                        puts stderr "Found successfully."
+                    }
+                } else {
+                    puts stderr "Fatal teleport result not consistent with any possible destination."
+                    if {$cfg($verbose) > 0} {
+                        puts stderr "    ostate= $ostate"
+                        puts stderr "     state= $state"
+                        puts stderr "    dstate= $dstate"
+                    }
+                }
             }
-            set state [list $oalive $oscore $olevel $tplayer $orobots $otrashes]
-            lassign [apply_move $state 0 0 1] _ state
         }
         if {[lindex $state 0] && ![llength [lindex $state 4]]} {
             # By whatever means, the player has cleared the level and
