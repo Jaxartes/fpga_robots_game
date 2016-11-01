@@ -39,6 +39,11 @@
 #   nocont - don't do any continuous moves
 #   3to1 - when coming up with "strategic" moves, prefer ones that cause
 #       three robots to collide into one place
+#   shiftdot $num - probability $num (in range 0-1) of doing "shift dot"
+#       in place of other random moves, when doing a random move, excluding
+#       the ones produced by the 'teles' option.  Even
+#       if this is zero, the "shift dot" move will occur sometimes anyway.
+#       default 0.0.
 #   keydelay $ms - Delay in milliseconds after each keycode sent.
 #       Default 200.
 #   movedelay $ms - Delay in milliseconds after moving, per move performed.
@@ -63,6 +68,7 @@ array set cfg {
     ,dumps p dumps 0.5
     ,nocont + nocont 0
     ,3to1 + 3to1 0
+    ,shiftdot p shiftdot 0.0
     ,eom + eom 0
     ,keydelay ms keydelay 200
     ,movedelay ms movedelay 200
@@ -831,6 +837,9 @@ while {1} {
         if {rand() < $cfg(teles)} {
             set move "tele"
             set cont 0
+        } elseif {rand() < $cfg(shiftdot)} {
+            set move [list 0 0]
+            set cont 1
         } elseif {rand() < 0.001} {
             set move "wait"
             set cont 0
@@ -875,6 +884,7 @@ while {1} {
     } elseif {$cont} {
         # A continuous move.  It happens until it doesn't happen.
         while {1} {
+            if {![llength [lindex $state2 3]]} break ; # no move: level ended
             lassign [apply_move $state [lindex $move 0] [lindex $move 1] 1] \
                 possible state2
             if {!$possible} break ; # doesn't happen: can't
