@@ -865,7 +865,9 @@ while {1} {
     set ostate $state
     set delays 1
     set force_dump "" ; # if a dump is forced, this contains the reason
-    if {$move eq "tele"} {
+    if {![lindex $state 0]} {
+        # Player dead, can't move.
+    } elseif {$move eq "tele"} {
         # A teleport, there's no way to predict where it will go.
         # Below, we'll do a dump and check that it was reasonable.
         set force_dump tele
@@ -884,7 +886,7 @@ while {1} {
     } elseif {$cont} {
         # A continuous move.  It happens until it doesn't happen.
         while {1} {
-            if {![llength [lindex $state2 3]]} break ; # no move: level ended
+            if {![llength [lindex $state 4]]} break ; # no move: robots all gone
             lassign [apply_move $state [lindex $move 0] [lindex $move 1] 1] \
                 possible state2
             if {!$possible} break ; # doesn't happen: can't
@@ -988,7 +990,7 @@ while {1} {
                     }
                 } else {
                     puts stderr "Fatal teleport result not consistent with any possible destination."
-                    if {$cfg($verbose) > 0} {
+                    if {$cfg(verbose) > 0} {
                         puts stderr "    ostate= $ostate"
                         puts stderr "     state= $state"
                         puts stderr "    dstate= $dstate"
@@ -1005,6 +1007,7 @@ while {1} {
             # derived from $dstate.
 
             puts stderr "New level player position: [lindex $dstate 3]"
+            puts stderr "New level robots count: [llength $drobots]"
 
             set state [list $alive $score [expr {$level + 1}] \
                 $dplayer $drobots $dtrashes]
