@@ -310,6 +310,12 @@ module fpga_robots_game_play(
                         prng[12:6] : // 0-119
                         7'd60; // 60
             rand_player_y <= { 1'd0, prng[5:0] } + 6'd16; // 16-79
+`ifdef FPGA_ROBOTS_UPPERLEFT
+            if (prng[14:13] == 2'd3) begin
+                rand_player_x <= 7'd0;
+                rand_player_y <= { 6'd0, prng[0] };
+            end
+`endif
         end
 
     // And change player position, when starting a new level, or teleporting,
@@ -701,7 +707,7 @@ module fpga_robots_game_play(
     //      mcsq_dont_score - pulse to indicate that command cannot give
     //          the player points; built up of various other signals
     reg mcsq_reset, mcsq_phase_up;
-    reg mcsq_proceed = 1'd1;
+    reg mcsq_proceed_saved = 1'd1;
     reg mcsq_phase = 1'd0;
     reg mcsq_scorable = 1'd0;
     reg player_dead = 1'd0;
@@ -716,14 +722,15 @@ module fpga_robots_game_play(
     wire mcsq_dont_score =
         move_kill_player && // if the player dies
         mcsq_movetime; // only if we're moving
+    wire mcsq_proceed = mcsq_proceed_saved && !mcsq_dont_proceed;
 
     always @(posedge clk)
         if (rst || mcsq_reset) begin
-            mcsq_proceed <= 1'd1;
+            mcsq_proceed_saved <= 1'd1;
             mcsq_phase <= 1'd0;
             mcsq_scorable <= 1'd1;
         end else begin
-            if (mcsq_dont_proceed) mcsq_proceed <= 1'd0;
+            mcsq_proceed_saved <= mcsq_proceed;
             if (mcsq_phase_up) mcsq_phase <= 1'd1;
             if (mcsq_dont_score) mcsq_scorable <= 1'd0;
         end
@@ -810,10 +817,9 @@ module fpga_robots_game_play(
                     sml_opcode_next = OPC_MV_ZEROTOP;
                 end
                 mcsq_reset = 1'd1; // reset the command state in mcsq_*
-            end else if (cmd_fns[2]) begin // F3: debug part of movement
-                // XXX get rid of or replace this before release
+            end else if (cmd_fns[2]) begin // F3: unused for now
                 cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
-                move_player_happens = 1'd1;
+                // XXX
             end else if (cmd_fns[0]) begin // F1: new level
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
 `ifdef FPGA_ROBOTS_F1_LEVEL

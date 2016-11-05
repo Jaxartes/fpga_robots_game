@@ -28,3 +28,10 @@
 // FPGA_ROBOTS_F1_LEVEL - Enable a debug/cheat feature: The F1 key will
 // result in going to a new level.
 `define FPGA_ROBOTS_F1_LEVEL 1
+
+// FPGA_ROBOTS_UPPERLEFT - Enable a debug feature: About 1/4 of the time,
+// when coming up with a random player position, instead of being spread
+// out over most of the screen, it'll be in the upper left hand corner
+// or the cell right below it.
+// `define FPGA_ROBOTS_UPPERLEFT 1
+

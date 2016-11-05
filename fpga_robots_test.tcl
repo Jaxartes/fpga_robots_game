@@ -25,6 +25,14 @@
 #       "strategic" move, it just continues it as long as it can.  Default 0.1.
 #   teles $num - Probability $num (in range 0-1) that, when doing a
 #       "random" move, it teleports.  Default 0.01.
+#   shiftdot $num - probability $num (in range 0-1) of doing "shift dot"
+#       in place of other random moves, when doing a random move, excluding
+#       the ones produced by the 'teles' option.  Even
+#       if this is zero, the "shift dot" move will occur sometimes anyway.
+#       default 0.0.
+#   goul $num - bias toward moving in the upper-left direction, when doing
+#       random normal moves, with probability $num (in range 0-1).
+#       default 0.0
 #   newgame $num - Probability $num (in range 0-1) of starting a new game
 #       even when you don't need one.  Default 0.0.
 #   newgamelevel $num - When doing a new game (see newgame), probability
@@ -39,11 +47,6 @@
 #   nocont - don't do any continuous moves
 #   3to1 - when coming up with "strategic" moves, prefer ones that cause
 #       three robots to collide into one place
-#   shiftdot $num - probability $num (in range 0-1) of doing "shift dot"
-#       in place of other random moves, when doing a random move, excluding
-#       the ones produced by the 'teles' option.  Even
-#       if this is zero, the "shift dot" move will occur sometimes anyway.
-#       default 0.0.
 #   keydelay $ms - Delay in milliseconds after each keycode sent.
 #       Default 200.
 #   movedelay $ms - Delay in milliseconds after moving, per move performed.
@@ -63,6 +66,7 @@ array set cfg {
     ,strategy p strategy 0.5
     ,butfast p butfast 0.1
     ,teles p teles 0.01
+    ,goul p goul 0.0
     ,newgame p newgame 0.0
     ,newgamelevel p newgamelevel 0.0
     ,dumps p dumps 0.5
@@ -844,7 +848,11 @@ while {1} {
             set move "wait"
             set cont 0
         } else {
-            set move [list [expr {int(rand()*3)-1}] [expr {int(rand()*3)-1}]]
+            set movex [expr {int(rand()*3)-1}]
+            set movey [expr {int(rand()*3)-1}]
+            if {rand() < $cfg(goul)} { set movex -1 }
+            if {rand() < $cfg(goul)} { set movey -1 }
+            set move [list $movex $movey]
             set cont [expr {rand() < 0.2 && !$cfg(nocont)}]
         }
         puts stderr "Next move '$move' (random) (cont=$cont)"
