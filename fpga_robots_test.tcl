@@ -1015,8 +1015,15 @@ while {1} {
             # derived from $dstate.
 
             puts stderr "New level player position: [lindex $dstate 3]"
-            puts stderr "New level robots count: [llength $drobots]"
+            puts stderr "New level robots count: [llength $drobots] for level [expr {$level + 1}]"
 
+            set scoreadd [llength $robots]
+            set scoreadd [expr {$scoreadd * (($move eq "wait") ? 2 : 1)}]
+            set score [expr {$score + $scoreadd}]
+            if {$cfg(verbose) > 0} {
+                puts stderr "Level-ending score addition: $scoreadd to $score"
+            }
+            
             set state [list $alive $score [expr {$level + 1}] \
                 $dplayer $drobots $dtrashes]
         }
