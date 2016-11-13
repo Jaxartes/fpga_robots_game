@@ -300,15 +300,25 @@ module fpga_robots_game_play(
             place_robot_old <= place_robot;
 
     // Logic for determining a player position, pseudorandomly, when starting
-    // a new level or when teleporting.
+    // a new level or when teleporting.  It's not quite uniform, because
+    // achieving that takes more logic area.  Instead:
+    //      X is:
+    //          15/16 of the time, evenly distributed in the range 0-119
+    //          1/16 of the time, evenly distributed in the range 32-95
+    //      Y is: evenly distributed in the range 16-79
+    // All is driven by the 16 bits of 'prng'.
     reg rand_player_new = 1'd1;
     reg [6:0]rand_player_x = 7'd0;
     reg [6:0]rand_player_y = 7'd0;
     always @(posedge clk)
         if (rst || rand_player_new) begin
-            rand_player_x <= (prng[12:6] < 7'd120) ?
-                        prng[12:6] : // 0-119
-                        7'd60; // 60
+            if (prng[12:9] != 4'd15)
+                rand_player_x <= prng[12:6]; // 0-119
+            else
+                rand_player_x <= { prng[15],
+                                   ~(prng[15]),
+                                   prng[14:13],
+                                   prng[8:6] }; // 32-95
             rand_player_y <= { 1'd0, prng[5:0] } + 6'd16; // 16-79
 `ifdef FPGA_ROBOTS_UPPERLEFT
             if (prng[14:13] == 2'd3) begin
@@ -351,10 +361,26 @@ module fpga_robots_game_play(
     assign ser_tx_stb =
         dump_tx_stb && ser_tx_rdy && dump_going && !dumpcmd_pause;
 
+`ifdef FPGA_ROBOTS_POSITION_DUMP
+    reg [13:0]dump_playerpos = 14'd0; // shift register to dump position
+    reg dump_playerpos_fill; // pulse this to set a new one
+    reg dump_playerpos_shift; // pulse this to rotate the shift register
+    always @(posedge clk)
+        if (rst)
+            dump_playerpos <= 14'd0;
+        else if (dump_playerpos_fill)
+            dump_playerpos <= { player_y, player_x };
+        else if (dump_playerpos_shift)
+            dump_playerpos <= { dump_playerpos[0],
+                                dump_playerpos[13:1] };
+`endif // FPGA_ROBOTS_POSITION_DUMP
+
     always @* begin
         dump_tx_dat = 8'd0;
         dump_tx_stb = 1'd0;
 
+`ifndef FPGA_ROBOTS_POSITION_DUMP
+        // normal dump, of the whole playing area
         if (sml_ph0 && sml_x_max && sml_y_max) begin
             // start the dump
             dump_tx_dat = 8'd35;
@@ -388,6 +414,29 @@ module fpga_robots_game_play(
             dump_tx_dat = 8'd38;
             dump_tx_stb = 1'd1;
         end
+`else // !FPGA_ROBOTS_POSITION_DUMP
+        // special short dump of player position only
+        dump_playerpos_fill = 1'd0;
+        dump_playerpos_shift = 1'd0;
+
+        if (sml_x_max) begin
+            if (sml_ph0 && sml_y == 6'd47) begin // 40: beginning
+                dump_tx_dat = 8'd40;
+                dump_tx_stb = 1'd1;
+                dump_playerpos_fill = 1'd1;
+            end
+            if (sml_ph0 && sml_y == 6'd1) begin // 41: ending
+                dump_tx_dat = 8'd41;
+                dump_tx_stb = 1'd1;
+                dump_playerpos_fill = 1'd1;
+            end
+            if (sml_ph4 && sml_y >= 6'd6) begin // 48-49: 42 bits
+                dump_tx_dat = { 7'd24, dump_playerpos[0] };
+                dump_tx_stb = 1'd1;
+                dump_playerpos_shift = 1'd1;
+            end
+        end
+`endif // FPGA_ROBOTS_POSITION_DUMP
     end
 
     // In-progress and in-future move commands.

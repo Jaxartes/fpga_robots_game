@@ -35,3 +35,7 @@
 // or the cell right below it.
 // `define FPGA_ROBOTS_UPPERLEFT 1
 
+// FPGA_ROBOTS_POSITION_DUMP - Replaces the full playing area dump
+// (6242 bytes) with one of just the player position.  Used for testing
+// the random player position.
+// `define FPGA_ROBOTS_POSITION_DUMP 1
