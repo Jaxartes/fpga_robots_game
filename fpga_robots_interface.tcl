@@ -194,8 +194,9 @@ proc gui_button_flash {sym} {
 }
 
 # handle_stdin: a character might be readable on standard input
-# YYY: This code cannoy handle multi-character keys such as you get with,
-# say, arrow keys.  But that's okay.
+# This code cannot handle multi-character keys such as you get with,
+# say, arrow keys.  But there are other reasons it's not working (terminal
+# mode issues) so I've not been using it.
 proc handle_stdin {} {
     global bychar delay
 

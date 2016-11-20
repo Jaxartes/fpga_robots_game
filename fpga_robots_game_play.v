@@ -8,8 +8,6 @@
 
 `include "fpga_robots_game_config.v"
 
-// XXX work in progress, incomplete, and untested
-
 module fpga_robots_game_play(
     // system wide control signals
     input clk, // clock: rising edge active, everything is synched to this
@@ -23,7 +21,8 @@ module fpga_robots_game_play(
     input dumpcmd_pause, // high to indicate dump output is paused
 
     // Signal to get the user's attention, like with a beep
-    output want_attention,
+    output reg want_attention_short, // short beep
+    output reg want_attention_long, // long beep
 
     // When is video in vertical blanking interval?
     input vbi,
@@ -217,7 +216,7 @@ module fpga_robots_game_play(
     reg [2:0]skw_count = 3'd0; // number of digits remaining to write
     reg [2:0]skw_count_saved = 3'd0; // old value of that
     reg skw_didread; // pulse when the result of a read, done on
-                     // behalf of the score writing, is done; in
+                     // behalf of the score writing, is available; in
                      // the same cycle a write may be performed
     wire skw_wen; // write enable
     wire [7:0]skw_wrt; // data to write
@@ -755,6 +754,7 @@ module fpga_robots_game_play(
     //          built up of various other signals
     //      mcsq_dont_score - pulse to indicate that command cannot give
     //          the player points; built up of various other signals
+    //      mcsq_die_now - player becomes dead
     reg mcsq_reset, mcsq_phase_up;
     reg mcsq_proceed_saved = 1'd1;
     reg mcsq_phase = 1'd0;
@@ -772,6 +772,7 @@ module fpga_robots_game_play(
         move_kill_player && // if the player dies
         mcsq_movetime; // only if we're moving
     wire mcsq_proceed = mcsq_proceed_saved && !mcsq_dont_proceed;
+    wire mcsq_die_now = mcsq_movetime && move_kill_player && !mcmd_nonlethal;
 
     always @(posedge clk)
         if (rst || mcsq_reset) begin
@@ -787,7 +788,7 @@ module fpga_robots_game_play(
     always @(posedge clk)
         if (rst || score_reset)
             player_dead <= 1'd0;
-        else if (mcsq_movetime && move_kill_player && !mcmd_nonlethal)
+        else if (mcsq_die_now)
             player_dead <= 1'd1;
 
     always @* begin
@@ -826,6 +827,7 @@ module fpga_robots_game_play(
     // Handle the "opcodes" of the state machine loop, especially
     // memory access.
     reg want_attention_f2;
+    reg want_attention_oob;
     always @* begin
         tm_adr = 13'd0;
         tm_wrt = 8'd0;
@@ -839,6 +841,7 @@ module fpga_robots_game_play(
         sk_level_inc = 1'd0;
         score_reset = 1'd0;
         want_attention_f2 = 1'd0;
+        want_attention_oob = 1'd0;
         dump_going = 1'd0;
         mcmd_clear_pending = 1'd0;
         mcsq_reset = 1'd0;
@@ -862,13 +865,12 @@ module fpga_robots_game_play(
                 if (move_oobounds) begin
                     // move would put player out of bounds, is not allowed
                     mcmd_clear_pending = 1'd1;
+                    // and it's good to let them know, sometimes
+                    if (!mcmd_continuous) want_attention_oob = 1'd1;
                 end else begin
                     sml_opcode_next = OPC_MV_ZEROTOP;
                 end
                 mcsq_reset = 1'd1; // reset the command state in mcsq_*
-            end else if (cmd_fns[2]) begin // F3: unused for now
-                cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
-                // XXX
             end else if (cmd_fns[0]) begin // F1: new level
                 cmd_fns_clr[0] = 1'd1; // clear the command pending indicator
 `ifdef FPGA_ROBOTS_F1_LEVEL
@@ -878,11 +880,12 @@ module fpga_robots_game_play(
             end else if (cmd_fns[1]) begin // F2: attention (beep & flash)
                 cmd_fns_clr[1] = 1'd1; // clear the command pending indicator
                 want_attention_f2 = 1'd1; // signal for a beep
+            end else if (cmd_fns[2]) begin // F3: unused for now
+                cmd_fns_clr[2] = 1'd1; // clear the command pending indicator
             end else if (cmd_dump_pending) begin // data dump over serial port
                 cmd_dump_clr = 1'd1;
                 sml_opcode_next = OPC_DUMP;
             end
-            // XXX handle all the commands here
         end
         OPC_NEWGAME : begin
             // Begin a new game.  This begins the first level of the game.
@@ -951,7 +954,6 @@ module fpga_robots_game_play(
         end
         OPC_ENDLEVEL: begin
             // A level is ending.  Start a new one - the next one.
-            // XXX consider adding a delay here
             sk_level_inc = sml_single;
             sml_opcode_next = OPC_NEWLEVEL;
         end
@@ -1036,8 +1038,6 @@ module fpga_robots_game_play(
             tm_adr = sml_adr;
             if (sml_rgt) begin
                 // Update the scores on the right side of the screen
-                // YYY not quite sure about the logic here for skw_didread
-                // and tm_wen WRT the wait for VBI stuff
                 skw_didread = sml_ph1 && (vbi || !WAIT_FOR_VBI);
                 tm_wen = skw_wen;
                 tm_wrt = skw_wrt;
@@ -1084,15 +1084,28 @@ module fpga_robots_game_play(
     end
 
     // Logic for getting the player's attention
-    assign want_attention = want_attention_f2; // XXX add more
+    always @* begin
+        want_attention_short = 1'd0;
+        want_attention_long = 1'd0;
+        // Let the F2 key cause a long beep
+        if (want_attention_f2)
+            want_attention_long = 1'd1;
+        // Let player death also cause a long beep
+        if (mcsq_die_now)
+            want_attention_long = 1'd1;
+        // Let a blocked single move cause a short beep
+        if ((mcsq_dont_proceed && !mcmd_continuous) || want_attention_oob)
+            want_attention_short = 1'd1;
+        // Or any attempt to move when the player is already dead
+        if (cmd_any && !mcmd_pending_any && player_dead)
+            want_attention_short = 1'd1;
+    end
 
+`ifdef FPGA_ROBOTS_CORNER_DEBUG
     assign debug_event = (sk_score_add >= 3'd4);
 
     always @(posedge clk)
         if (debug_event) corner_debug <= corner_debug + 1'd1;
-
-    // XXX attn when a move command comes in but is rejected (cmd_any && (mcmd_pending_any || player_dead)
-    // XXX attn when player dies
-    // XXX attn when a single move command fails because player would die
+`endif
 
 endmodule

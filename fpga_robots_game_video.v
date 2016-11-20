@@ -111,8 +111,9 @@ module fpga_robots_game_video(
     // come a cycle later, so stage 2.  The memory is dual-ported, so I
     // hope your FPGA has double ported RAM.
 
-    // the memory
-    // YYY I only need 6kB, but this is 8kB for now
+    // The memory.
+    // This is 8kB, only 6kB is needed, but making a non-power-of-two memory
+    // size is more trouble than it's probably worth.
     reg [7:0] tile_map[0:8191];
 
     // initialize the memory contents

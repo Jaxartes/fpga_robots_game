@@ -5,8 +5,6 @@
 // the other components, as well as providing as much as possible of the
 // platform specific detail.
 
-// XXX work in progress
-
 `include "fpga_robots_game_config.v"
 
 module fpga_robots_game(
@@ -245,6 +243,8 @@ module fpga_robots_game(
 
     // Game play logic.
     wire play_dbg;
+    wire want_attention_short;
+    wire want_attention_long;
     fpga_robots_game_play play(
         // general system stuff
         .clk(clk), .rst(rst),
@@ -253,7 +253,8 @@ module fpga_robots_game(
         .dumpcmd_start(ctl_dumpcmd),
         .dumpcmd_pause(ctl_dumppause),
         // output: start a beep
-        .want_attention(want_attention),
+        .want_attention_short(want_attention_short),
+        .want_attention_long(want_attention_long),
         // access to the tile map memory
         .tm_adr(tm_adr), .tm_wrt(tm_wrt), .tm_red(tm_red), .tm_wen(tm_wen),
         // serial port access for data dump
@@ -267,17 +268,19 @@ module fpga_robots_game(
         .dbg(play_dbg)
     );
 
-    // Attention signal: visual and audible for ~1/2 second, counted by
+    // Attention signal: visual and audible for short period counted by
     // video frames
-    reg [4:0]atnctr = 5'd0;
+    reg [5:0]atnctr = 6'd0;
     assign attention = |atnctr;
     always @(posedge clk)
         if (rst)
-            atnctr <= 5'd0;
-        else if (want_attention) begin
-            atnctr <= 5'd30;
-        end else if (framepulse && attention) begin
-            atnctr <= atnctr - 5'd1;
-        end
+            atnctr <= 6'd0;
+        else if (want_attention_short)
+            atnctr <= 6'd15; // 15 frames = ~1/4 second
+        else if (want_attention_long)
+            atnctr <= 6'd45; // 45 frames = ~3/4 second
+        else if (framepulse && attention)
+            atnctr <= atnctr - 6'd1;
 
 endmodule
+
