@@ -1,5 +1,29 @@
+// Copyright (c) 2016 Jeremy Dilatush
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY JEREMY DILATUSH AND CONTRIBUTORS
+// ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+// TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL JEREMY DILATUSH OR CONTRIBUTORS
+// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+
 // fpga_robots_game_play.v
-// Jeremy Dilatush - started June 2016
+// started June 2016
 //
 // The "heart" of the FPGA robots game code:  This is the part which reacts
 // to user input and manipulates the contents of the screen as a result.
@@ -177,7 +201,7 @@ module fpga_robots_game_play(
     wire sml_ph4 = (sml_ph == 3'd4);
     wire sml_x_min = !(|sml_x); // sml_x == 0
     wire sml_y_min = !(|sml_y); // sml_y == 0
-    wire sml_single = // pulses once per opcode, for things that only
+    wire sml_once = // pulses once per opcode, for things that only
                       // need to be done that one time; in particular it
                       // pulses during the last clock of that opcode
         sml_ph4 && sml_x_min && sml_y_min;
@@ -334,6 +358,8 @@ module fpga_robots_game_play(
     reg [6:0]player_y = 7'd0;
     always @(posedge clk)
         if (rst || score_reset) begin
+            // player_{x,y} will get their real values when OPC_NEWGAME
+            // pulses sk_level_inc.
             player_x <= 7'd0;
             player_y <= 7'd0;
             rand_player_new <= 1'd1;
@@ -895,8 +921,8 @@ module fpga_robots_game_play(
             // The one thing that doesn't fit between is pulsing sk_level_inc,
             // because it can't happen at the same time as score_reset.
 
-            // pulse sk_level_inc once, during the entire time this opcode runs.
-            sk_level_inc = sml_single;
+            // pulse sk_level_inc once, out of the entire time this opcode runs.
+            sk_level_inc = sml_once;
             sml_opcode_next = OPC_NEWLEVEL;
         end
         OPC_NEWLEVEL: begin
@@ -954,7 +980,7 @@ module fpga_robots_game_play(
         end
         OPC_ENDLEVEL: begin
             // A level is ending.  Start a new one - the next one.
-            sk_level_inc = sml_single;
+            sk_level_inc = sml_once;
             sml_opcode_next = OPC_NEWLEVEL;
         end
         OPC_BOOT: begin
@@ -1009,18 +1035,18 @@ module fpga_robots_game_play(
                 // to state OPC_MV_COPYDOWN to copy the move results
                 // and make them visible
                 sml_opcode_next = OPC_MV_COPYDOWN;
-                if (sml_single) surviving_robot_start = 1'd1;
+                if (sml_once) surviving_robot_start = 1'd1;
             end else if (mcsq_proceed) begin
                 // It's going through states the first time, and there
                 // was no problem, so it can proceed to do so again,
                 // from OPC_MV_ZEROTOP.
                 sml_opcode_next = OPC_MV_ZEROTOP;
-                if (sml_single) mcsq_phase_up = 1'd1;
+                if (sml_once) mcsq_phase_up = 1'd1;
             end else begin
                 // It's going through states the first time, and it turns
                 // out it can't continue.
                 sml_opcode_next = OPC_IDLE;
-                if (sml_single) mcmd_clear_pending = 1'd1;
+                if (sml_once) mcmd_clear_pending = 1'd1;
             end
         end
         OPC_MV_COPYDOWN: begin
@@ -1052,7 +1078,7 @@ module fpga_robots_game_play(
             // When this is done, go back to OPC_IDLE which gets to decide
             // what we'll be doing next.
             sml_opcode_next = OPC_IDLE;
-            if (sml_single) begin
+            if (sml_once) begin
                 // After OPC_MV_COPYDOWN is done: maybe clear the command;
                 // and maybe move the player; it depends.
                 if (!mcsq_phase) begin

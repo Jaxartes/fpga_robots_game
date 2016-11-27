@@ -1,5 +1,4 @@
 // fpga_robots_game_config.v
-// Jeremy Dilatush - started May 2016
 
 // Various "defines" which control the Verilog code
 

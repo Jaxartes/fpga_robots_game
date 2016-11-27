@@ -21,7 +21,7 @@ clean:
 # a.out: runs Icarus Verilog to check syntax of the Verilog; this doesn't
 # build it for the FPGA, which is to be done separately via Xilinx's ISE.
 a.out: $(VERILOG)
-	iverilog $(VERILOG)
+	iverilog -Wall $(VERILOG)
 
 # tile_images.mem: Tile font.
 tile_images.mem: tile_images.png
