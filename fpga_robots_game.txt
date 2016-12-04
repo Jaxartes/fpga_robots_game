@@ -1,0 +1,551 @@
+### The FPGA Robots Game
+### Documentation
+
+### Introduction
+
+This document describes the "FPGA Robots Game" - what it is, how it works,
+and how to use it.
+
+The "FPGA Robots Game" recreates the classic "robots" game on an FPGA.
+There's no CPU in it running the program, just logic to implement the
+game and its associated I/O devices.
+
+It's free to use and reuse (under the BSD license).  The other side
+of that is, there's no warranty.  While I'm generally willing to
+*help* solve problems, fundamentally it's on *you* to make it work
+for you, or not.
+
+The intended audience is FPGA hobbyists and students.  If all you want
+is to play the game, very similar games are available, also for free,
+in the form of computer software.  Those are recommended.
+
+### Hardware and getting started
+
+The game is meant to be portable to any FPGA with sufficient logic
+resources (and it doesn't take much) along with some pretty basic
+equipment: a PS/2 keyboard, and a VGA display.
+
+Easiest is to use the same equipment I used, namely:
+    + The "Papilio Pro" FPGA board
+        http://www.papilio.cc/index.php?n=Papilio.PapilioPro
+        This contains the FPGA and is where the game's logic runs.
+        It contains a Xilinx Spartan 6 LX9 FPGA.
+    + The "Papilio Arcade MegaWing" I/O board
+        http://www.papilio.cc/index.php?n=Papilio.ArcadeMegaWing
+        This adapter provides the various connection ports used by
+        the game, namely:
+            - VGA-compatible video out, used to connect a monitor
+            - two PS/2 ports; one (A) is used to connect a keyboard; the
+            other (B) is ignored by this game
+            - audio out, used to connect headphones or a speaker to hear
+            the game beep at you
+    + A PS/2 compatible keyboard
+        These are less common nowadays, than they used to be, but plenty
+        of older keyboards are still around.
+    + A VGA compatible video monitor
+        It needs to be able to display 1024x768 @ 60 Hz.
+    + Computers
+        Used for putting the logic on the FPGA.
+    + Xilinx's ISE software version 14.7
+        This is not the latest version of the Xilinx toolset, but it's
+        one which works for the Papilio Pro board.
+
+To adapt it to different equipment would require some coding.  It should
+be practical for someone who's worked with FPGA's, is tolerably familiar
+with the FPGA their porting it to, and is willing to get somewhat familiar
+with the internals of this game.  See also "Inside the game" in this
+document.
+
+To build it for the Papilio Pro + Papilio Arcade combination:
+    + Start Xilinx ISE
+    + Create an ISE project
+    + Add the source files to the project:
+        fpga_robots_game.v
+        fpga_robots_game.ucf
+        all the other files that have the .v suffix
+    + Build it, through the "Generate Programming File" stage
+    + Load the resulting file (which has the .bit suffix) onto the FPGA
+
+I could have saved you some work in the above steps by including the
+.gise and .xise files from my own ISE project, but I'm not sure it's legal
+for me to do so due to the Xilinx copyright notice in the files.
+
+### Playing the game
+
+If everything is hooked up and initialized properly, what you'll see
+on your monitor is:
+    + In the left >90% of the screen is the playing area.  There are
+    some number of robots and one player, who pops up in a random
+    location on the screen.
+    + Along the right edge of the screen are the score, high score,
+    current level number, and name of the game.
+The file example_screen.png may give you a rough idea what it looks like.
+The jittery flickery movements on the screen are intentional.
+
+In the game, you share the playing area of the screen with a bunch of
+nasty robots that want to destroy you.  With every turn, you may move
+one square in any direction, and so may each of the robots.
+
+You get to select the way you move in each turn, using the keyboard.
+The robots always move directly toward you.  If they run into each
+other, they're destroyed, and become trash.  If they run into trash,
+they're destroyed, and become trash.  If they run into you, you die,
+and the game is over.  The object of the game is to avoid that happening.
+
+The result is that you wander around the screen for a few turns, as the
+robots get closer and closer to you (and each other).  Then you can't
+move anywhere.
+
+Luckily, you also are able to "teleport."  This puts you in a random
+location on the screen.  If you're far away from the robots, good, you
+can make them chase you around and crash into each other some more.
+If you teleport right next to a robot, or onto some trash, you're dead,
+the game is over.
+
+Since the game isn't just about not making mistakes (that would
+just be annoying), most moves that would result in killing you, just don't
+happen.  The game will beep at you, and in case you don't have a speaker
+or headphones connected, the right-hand side of the screen will flash too.
+
+And since the game isn't just about making you hit the keyboard over
+and over again (also annoying), you can make a move repeat by holding
+the "shift" key down while pressing the movement key.  This will repeat
+as long as you can safely move in that direction, then it will stop.
+
+When there are no robots left, you have completed the level.  It automatically
+moves you to the next level, where there are more robots (and usually more
+than in the last level) and the game continues.
+
+You are scored on the robots you destroy.  You get one point for each.
+There is also a way to get two points per robot, but it's risky:  You
+"wait," without moving, until either a robot kills you, or you clear the
+level.  So this is something you do only when you're safely behind a
+pile of trash.
+
+For each move command there are multiple keys you can choose from.
+You can use the numeric keypad for most moves, or you can use the arrow
+keys or the letter keys. (The choice of which letter corresponds to which
+direction was historical, and is based on the terminal based BSD "robots"
+game).  They are as follows:
+    The eight movement directions (including diagonals and non-moving):
+        up-left     keypad "7", letter "Y"
+        up          keypad "8", letter "K", up arrow
+        up-right    keypad "9", letter "U"
+        left        keypad "4", letter "H", left arrow
+        non-moving  keypad "5", punctuation ".", keypad "."
+        right       keypad "6", letter "L", right arrow
+        down-left   keypad "1", letter "B"
+        down        keypad "2", letter "J", down arrow
+        down-right  keypad "3", letter "N"
+    These perform single moves if safe, or, shifted, continuous moves
+    as long as safe.  The following keys may be used for a continuous
+    move:
+        shift
+        control
+        alt
+        gui (on most keyboards, this has the Windows(TM) logo)
+        num lock
+
+    Other, special commands:
+        quit        letter "q", "esc" key, "backspace" key, keypad "/"
+            Quit the game (and start a new one).
+        teleport    keypad "*", letter "T"
+            Teleport to a random location on the board.
+        wait        keypad "0", letter "W"
+            Stand still until either all robots are destroyed or the
+            player is dead.  Double points for all robots destroyed.
+
+    Other keys recognized:
+        shift-scroll
+            Hit this combination twice in order to reset the game logic
+            on the FPGA.  Mostly this is used while debugging.
+        F1, F2, F3
+            These perform special functions, for testing or perhaps
+            "cheats."  By default the only one which works is F2, which
+            does nothing but beep.
+
+### Inside the game
+
+In this section I lay out what the provided files are for, and then
+how the game works.  It's mainly of interest to someone trying to
+modify the game.
+
+The game contains several files in the Verilog language (.v suffix); these
+are compiled by the Xilinx ISE (or other FPGA vendor tools) to generate
+the logic which runs on the FPGA.  Onchip memory is initialized with
+several files using the .mem suffix, with one byte per line, in
+hexadecimal, with no comments.  And there are a number of scripts in
+the Tcl language (.tcl) suffix; some are for testing, others for building
+the various .mem memory initialization files.
+
+Files:
+    README.txt
+        Brief introduction to the game.
+    fpga_robots_game.txt
+        Detailed information about the game.
+    copyrights.txt
+        Some information about copyrights for information taken into this
+        project.
+    example_screen.png
+        An example screen from the game.  It's not actually from any
+        time the game was played, instead it's from fpga_robots_gfxer.tcl
+        designed to preview the various game elements.
+    Makefile
+        Input for 'make' to use in building some of the stuff.  Unfortunately
+        unlike a good Makefile it doesn't build most of it (the ISE parts)
+        and it doesn't run solely on the command line
+        (it runs fpga_robots_gfxer.tcl which displays graphically).
+    fpga_robots_game.v
+        The "top level" of the game logic that runs on the FPGA.  This
+        connects the other components together and to the hardware.
+    fpga_robots_game.ucf
+        A "constraints file" for Xilinx ISE.  Most importantly, it maps
+        the named input/output signals found in fpga_robots_game.v to
+        the actual pins on the FPGA.  It's specific to the
+        combination of the Papilio Pro with the Papilio Arcade MegaWing.
+        For any other hardware you'll probably need to replace this file
+        with an appropriate one.
+    fpga_robots_game_config.v
+        Edit this file to enable/disable various features of the game
+        at build time.
+    fpga_robots_game_clock.v
+        This handles most of the timing signals:
+            65MHz pixel clock for the video output
+            115,200 baud rate for the serial port
+            ~6us pulse interval for the PS/2 keyboard
+            ~4Hz animation timing
+        This is the single most hardware-specific part, in particular if
+        you run on a different FPGA (or on a board with a different
+        clock input) you'd have to change this file.
+    fpga_robots_game_video.v
+        This generates the VGA video output, in 1024x768 resolution at
+        60Hz.  It also "owns" the 6 kilobytes of tile map memory which is used
+        to play the game.
+    fpga_robots_game_control.v
+        This interprets user keypresses as game commands.
+    fpga_robots_game_play.v
+        The heart of the game: This is what moves the robots, and the player;
+        keeps score; and figures out whether a move can continue or not.
+    ps2.v
+        PS/2 keyboard compatible interface.  Taken from another FPGA
+        project, VTJ-1 (https://github.com/Jaxartes/vtj1).
+    serial_port.v
+        Implements a serial port for communication with a host computer.
+        The game doesn't require it, but it's useful in testing and
+        debugging.
+    misc.v
+        Several modules together in a single file:
+            lfsr_20_3()
+                A pseudorandom number generator.  Used for the jittery
+                video animation.
+            lfsr_29_8()
+                A pseudorandom number generator.  Used for placement
+                of player and robots in the game.
+            sinewaver()
+                Synthesizes a sine wave, used for the audio "beep" tone.
+            decadd(), digit2(), digit6(), digit6max()
+                Binary coded decimal (BCD) numbers, used for keeping the
+                game scores.
+        Also has code for testing these modules in Icarus Verilog,
+        a simulator.
+    fpga_robots_interface.tcl
+        GUI application to run on a host computer, communicating with
+        the FPGA over the serial port, to let you issue commands without
+        actually plugging a PS/2 keyboard into the FPGA.
+    fpga_robots_dump.tcl
+        Command line application to run on a host computer, communicating
+        with the FPGA over the serial port, to "dump" the contents of
+        the game screen, in text form.
+    key_table.mem
+        Maps of keyboard scancodes to game commands.  Not human readable.
+        Generated by key_table_gen.tcl and interpreted by
+        fpga_robots_game_control.v.
+    key_table_gen.tcl
+        Program to run on a host computer at build time, to generate
+        the key mapping table, key_table.mem.  Inside key_table_gen.tcl
+        are the actual human-readable and human-editable key mappings.
+        After you modify this file, "make" will run it to generate a
+        new key_table.mem.
+    tile_map_init.mem
+        Initial contents of the "tile map" memory:  This has 6,144 bytes,
+        one for each pair of 8x8 pixel cells in the display.  Most of it,
+        the playing area, gets overwritten when a new game starts.
+        You can use fpga_robots_gfxer.tcl (run via 'make') to preview
+        the results of your edits.
+        This file consists of one byte per line, in hexadecimal, with
+        no comments or anything, for input to Verilog's $readmem().
+    tile_images.mem
+        Contents of the "tile image" memory:  Contains 4,096 bytes,
+        eight for each of 128 8x8 pixel tiles on the screen.  This is
+        not edited directly, instead you edit tile_images.png and
+        then run fpga_robots_gfxer.tcl (via 'make') to preview the
+        resulting screen and generate tile_images.mem.
+    tile_images.png
+        Editable source of the screen tile images in tile_images.mem.
+        There are 128 tile images, each 8x8 pixels, in a 10x10 pixel
+        area of the pic.  Of the tiles:
+            * The first 22 are the digit 0-9 and space, to be used
+            in displaying numbers on the right hand side of the screen.
+            There are two tiles for each character.
+            * The next 74 are other symbols to appear in the right side
+            of the screen, used in pairs, corresponding to "tile map"
+            byte values 11-47.
+            * The remaining 32 are eight tile images each, for the four
+            things that can appear in the playing area: blank, robot,
+            trash, and player.  There are eight of each to provide a
+            little bit of animation.
+        After editing this, run 'make' to run fpga_robots_gfxer.tcl to preview
+        the resulting screen and to generate tile_images.mem.
+    tile_images.xcf
+        The same image as in tile_images.png, which see; use if you
+        want to edit via the "GIMP" software.  After editing, export
+        as tile_images.png and perform the instructions given under
+        tile_images.png, above.
+    fpga_robots_gfxer.tcl
+        This does two things: Converts tile_images.png into tile_images.mem,
+        and graphically previews the screen produced by that and
+        tile_map_init.mem.  Normally you run this via 'make', and
+        after running it, rebuild the project in Xilinx ISE.
+    fpga_robots_test.tcl
+        Test program.  It runs on the command line on a host communicating
+        with the game via a serial port.  Depending on command line options,
+        it issues various game commands randomly, dumps the contents of
+        the tile map memory, and checks it against predicted values.
+        Can be run unattended, even without a keyboard or display being
+        hooked up.  Not quite perfect, it has some bugs of its own,
+        but it's useful for testing the game play logic in
+        fpga_robots_game_play.v.
+    fpga_robots_position_dumps.tcl
+        A minor test thing, doesn't work without changes in
+        fpga_robots_game_config.v.
+    1024x768sim.tcl
+        A minor test thing, not of general interest.
+    tmaprand.tcl
+        A minor development tool thing, not of general interest.
+
+Most of the above you don't have to edit or run, just to play with the
+game.  If you want to edit particular aspects of the game here's where
+to look:
+    To change the tile graphics:
+        See tile_images.png above for more details.  Basically you edit
+        the graphic file tile_images.png, then run 'make' to
+        preview/convert it with 'fpga_robots_gfxer.tcl', then rebuild
+        in Xilinx ISE (or other FPGA tools).
+    To change the contents of the score display area on the right
+    side of the screen:
+        That goes in tile_map_init.mem.  See fpga_robots_game_video.v for
+        more explanation of what goes in the tile map memory.  Mostly
+        what you'd edit are the final 6 bytes (lines) of each group of
+        128.  Be sure not to add/delete lines.  Then you can run
+        'make' to preview it with 'fpga_robots_gfxer.tcl', then rebuild
+        in Xilinx ISE (or other FPGA tools).
+    To change the keyboard command mapping:
+        Edit 'key_table_gen.tcl'.  In particular the following parts:
+            + 'meanings' - maps a list of key names to a list of
+            functions.
+            + 'scancodes2' - identifies the key names and their
+            corresponding PS/2 keyboard scan code values.
+        Once it's edited, the 'make' command will run it to generate
+        a new key_table.mem.  Then rebuild in Xilinx ISE (or other
+        FPGA tools).
+    To make it work on other "MegaWing" I/O boards with the Papilio Pro
+    FPGA board:
+        Edit or replace fpga_robots_game.ucf and rebuild in Xilinx ISE
+        (or other FPGA tools).
+    To make it work with other FPGAs:
+        This is a bigger task.  I recommend being familiar with your
+        FPGA and the vendor tools for it, and being prepared to spend
+        some time testing and debugging.
+
+        fpga_robots_game.v hooks the various input/output signals
+        of the various other modules up to the pins of the FPGA.
+
+        fpga_robots_game.ucf identifies those particular pins.  In
+        different FPGA tools it may have a different format and file suffix.
+
+        fpga_robots_game_clock.v generates timing signals.  This probably
+        requires FPGA-specific components such as PLLs.  See the
+        existing code and its comments, to see what signals you have to
+        generate.
+
+        The rest of the game files should be hardware independent, maybe.
+        I've written my Verilog code to "infer" the FPGA hardware details
+        rather than explicitly laying them out (except for PLLs in
+        fpga_robots_game_clock.v) but of course there's always the possibility
+        that something is wrong or broken or incompatible with some other
+        FPGA architecture.  It's like porting software to a new platform:
+        it's a matter of finding and resolving these things.
+    To tweak a few options in the game:
+        Edit fpga_robots_game_config.v - comments in that file explain
+        what the options are - and then rebuild using Xilinx ISE (or other
+        FPGA tools).
+
+For most of the internal details of the project - modules and their
+interface signals - see comments in the source code.  I put only a few
+highlights in here.
+
+Commands from the keyboard are interpreted by fpga_robots_game_control.v
+using a table in key_table.mem (ultimately derived from key_table_gen.tcl).
+This table is stored in 1 kilobyte of on-chip RAM, in 512 entries each
+16 bits wide.  There are two entries for each byte value received from
+the keyboard - one "normal" one, and on extended by the 0xe0 (224) byte
+prefix.  Each entry contains 16 bits which are passed to
+fpga_robots_game_play.v as follows:
+    0x8000 - this is modifier key
+    0x4000 - this is scroll lock key (twice, modified, produces
+        a system reset)
+    0x0800 - this does quit
+    0x0700 - no use in the game; available for tests etc
+    0x001f - single player move
+        0-15 no command
+        16-23 E SE S SW W NW N NE
+        24 command "." to stay still
+        25 teleport
+        26 wait
+
+The contents of the display screen are controlled by two on-chip
+memories: The tile image memory (see tile_images.* above) which contains
+128 8x8 pixel images, and the tile map memory, which controls which
+such image to display.
+
+The tile map memory is a dual-ported memory:  The fpga_robots_game_video.v
+reads it, to decide what to display; and fpga_robots_game_play.v reads
+and writes it, to perform most of the game operations.
+
+The tile map memory is 6,144 bytes.  It has one byte for each two 8x8
+cells of the screen (one above the other).  In the "playing area" of
+the screen (the leftmost 960x768 pixel area) each byte consists of four
+2-bit fields:
+    least significant - what to display in the upper cell: empty, robot,
+        trash, or player
+    next - what to display in the cell below it
+    next - a second copy of the "least significant" one, never displayed,
+        but used while updating the game state, for temporary storage
+    most significant - a second copy of the one below it, also never
+        displayed, but used for temporary storage
+In the "score area" of the screen (the rightmost 64x768 pixel area) bytes
+are interpreted differently, as follows:
+    A byte value 0-63 refers to a pair of tiles, out of the 128 tile images;
+    one tile of the pair is used in the upper 8x8 cell, the next one in
+    the cell below it.
+    A byte value 64-255 consists of a five bit field (lower) and a three
+    bit field (upper).  The five bit field, value 0-31, identifies a pair
+    of tiles just like the byte values 0-31.  The three bit field is
+    used as a "tag" which fpga_robots_game_play.v uses in order to find
+    out where to display the score numbers:
+        160 - This tag appears on the rightmost digit of a 2-digit level
+            number.
+        192 - This tag appears on the rightmost digit of a 6-digit score
+            number.
+        224 - This tag appears on the rightmost digit of a 6-digit
+            high score number.
+    Having six digits for score is probably overkill (my best score is
+    around 1500 points) but it's better than running out.  Tag values
+    64, 96, and 128 are not used and are available for future enhancement.
+    Tag values 0 and 32 are not available.
+
+    Byte values 0-9 (and their corresponding "tagged" values) represent
+    the corresponding digits 0-9.  Byte value 10 represents a blank.
+
+    So if the score is 1234 what you'll actually see in tile map memory is:
+        10 - blank
+        10 - another blank
+        1 - digit 1
+        2 - digit 2
+        3 - digit 3
+        196 - digit 4, plus a tag marking this as a score
+
+The robots game can communicate with a host computer of a serial port.
+In the current setup, that goes over the USB port and is accessed on
+Linux as /dev/ttyUSB1.  The serial port is not necessary to play the game,
+but it is convenient for testing.  It also lets you play without
+a keyboard (see fpga_robots_interface.tcl).
+
+The serial port is run at 115,200 baud, 8n1.  Bytes received over
+the serial port act as commands as follows
+    bytes 64-79 - These copy a value 0-15 into a 4-bit register for
+        later use by other commands
+    bytes 80-95 - These combine a value 0-15 with the 4-bit register
+        to create an 8-bit byte; the game acts is if that byte value
+        was received from the keyboard.  Thus, the following sequence
+        of bytes: 65, 85, 79, 80, 65, 85, will act as though the
+        "q" key were pressed and released, restarting the game.
+        This is how fpga_robots_interface.tcl transmits commands to
+        the game.
+    byte 96 - starts a "dump" of the game state
+
+The command byte 96 results in a dump of the game state, from the tile
+map memory, in the following format:
+    The dump starts with byte value 35.
+    The dump contains 48 of the following (one per pair of rows) from
+    bottom up to top:
+        The row pair starts with byte value 36.
+        The next eight bytes are part of the score area, eight bytes
+        encoded as follows, from right to left:
+            If memory byte is < 128: 48 plus the low 4 bits of memory.
+            If memory byte is >= 128: 64 plus the low 7 bits of memory,
+                leaving out the 16's bit.
+        The next 120 bytes are part of the playing area 120 bytes
+        encoded as follows, from right to left:
+            48 plus the low 4 bits of memory.
+        The row pair ends with byte value 37.
+    The dump ends with byte value 38.
+
+A complete dump consists of 6,242 bytes over the serial line.  For some
+unknown reason, I'm often reading only 227 bytes instead.  That's a bug,
+but I have no idea why it happens.  I'm not planning to do anything about
+it since it's meant for testing and debugging and is easiler worked
+around.
+
+The scripts fpga_robots_test.tcl and fpga_robots_dump.tcl are capable
+of issuing the dump command and reading back the results.
+
+The serial port supports XON/XOFF flow control when doing a memory dump.
+The rest of the time there is no flow control.  Really, who would type
+more than 3,000 keys per second?
+
+### Conclusions
+
+I began this as a learning project, and here are a few things I learned:
+    + This was a *LOT* more work than I expected.  If I'd known how much
+    I might not have tried it.
+    + The "game play" part - in fpga_robots_game_play.v - turned out a lot
+    more complicated than I expected it.  If I'd known that, I'd have
+    probably split it into two or three components.  The big benefit
+    of doing so would be to keep the signals between them in some logical
+    arrangement, instead of all mixed together, which proved difficult
+    for debugging.
+
+Having done it, I'm making it available for others to play with or
+modify.  Interesting areas where someone could improve it are:
+    + Adapting it to other FPGA chips and boards.
+    + Adding support for a joystick and/or directional buttons.  The
+    Papilio Arcade MegaWing board I have has a joystick port.  But trying
+    to control the game with the joystick hits one big problem:  The single
+    stick and single button, available on the old game controllers, is not
+    enough to control this game.
+    + Better tile images, to make the graphics look better.
+    + The image is a little blurry on my monitor.  I don't know whether
+    the 65MHz pixel clock is a fast for this FPGA to generate, or if it's
+    just because my monitor is upconverting to its native 1280x1024
+    resolution, or if there's a simple fix in the code.
+    + Write a program to try and play the game as well as possible,
+    from a host computer.  The program would send commands over the
+    serial port, and then when a teleport or new level occurs, order
+    a "dump" to retrieve the new robot positions.  fpga_robots_test.tcl
+    can do this, with the options "strategy 1.0 dumps 0.0", but it's
+    not very good.
+
+### See also
+
+A GUI robots game is included as part of the GNOME Games software package,
+available on Linux and other systems:
+    https://wiki.gnome.org/action/show/Apps/Games
+
+A terminal-based robots game, "robots", included in the "BSD games"
+package available on Linux and other systems.  On Debian based Linux
+distributions (including Ubuntu) it may be installed
+with "sudo apt-get install bsdgames".
+
+https://en.wikipedia.org/wiki/Robots_(computer_game)
+

@@ -50,7 +50,7 @@ set meanings {
     {"N" "KP 3"}           se
     {"W" "KP 0"}           wait
     {"T" "KP *"}           teleport
-    {"Q" "ESC" "BKSP"}     quit
+    {"Q" "ESC" "BKSP" "KP /"} quit
     {"L SHFT" "R SHFT"
      "L CTRL" "R CTRL"
      "L ALT" "R ALT"
