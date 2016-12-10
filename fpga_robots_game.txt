@@ -164,6 +164,11 @@ game).  They are as follows:
             "cheats."  By default the only one which works is F2, which
             does nothing but beep.
 
+Major differences from the BSD robots game include:
+    + Larger playing area size: 120x96 versus 58x22
+    + Fewer points per robot: 1 versus 10
+    + Larger (proportionally) wait bonus: 100% vs 10%
+
 ### Inside the game
 
 In this section I lay out what the provided files are for, and then

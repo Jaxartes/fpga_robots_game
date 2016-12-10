@@ -41,7 +41,12 @@
 # Colors won't be reproduced exactly, far from it.
 
 # check the command line
+set example 0
 set overwrite 0
+if {[lindex $argv 0] eq "example"} {
+    set example 1
+    set argv [lrange $argv 1 end]
+}
 if {[lindex $argv 0] eq "overwrite"} {
     set overwrite 1
     set argv [lrange $argv 1 end]
@@ -190,6 +195,7 @@ for {set y 0} {$y < 768} {incr y} {
         preview put \
             [format "\#%02x%02x%02x" $pcr $pcg $pcb] \
             -to $x $y
+        preview transparency set $x $y 0
     }
 }
 canvas .preview -width 1034 -height 778 -background darkgray
@@ -198,6 +204,10 @@ pack .preview
 
 button .btn -text "Write '$output_filename'" -command do_write
 pack .btn
+if {$example} {
+    button .btn2 -text "Write 'example_screen.png'" -command do_example
+    pack .btn2
+}
 
 proc do_write {} {
     # Write the tile image file: 4,096 hex bytes, one per line, each
@@ -221,4 +231,8 @@ proc do_write {} {
     .btn configure -text "Exit" -command exit
 }
 
-
+proc do_example {} {
+    # Write the example screen image file.  Unfortunately, this writes
+    # it in GIF format because I've had some trouble with the PNG encoder.
+    preview write example_screen.png -format "gif" -background black
+}
