@@ -579,3 +579,5 @@ with "sudo apt-get install bsdgames".
 
 https://en.wikipedia.org/wiki/Robots_(computer_game)
 
+A one-minute demonstration video of the game:
+    https://youtu.be/CGvi4R3oI7w
