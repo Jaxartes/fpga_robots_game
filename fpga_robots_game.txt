@@ -543,6 +543,10 @@ modify.  Interesting areas where someone could improve it are:
 
 ### See also
 
+Gadget Factory - designers and makers of the Papilio board, which was used
+in developing this project.
+    http://papilio.cc
+
 A GUI robots game is included as part of the GNOME Games software package,
 available on Linux and other systems:
     https://wiki.gnome.org/action/show/Apps/Games
