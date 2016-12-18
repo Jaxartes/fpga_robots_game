@@ -60,6 +60,7 @@ module fpga_robots_game_clock(
     assign oclk = iclk;
     assign locked = 1'd1;
 `else
+`ifdef FPGA_ROBOTS_CLK_XS6_32
     // For Papilio Pro, and other boards with a Xilinx Spartan-6, two
     // or more PLLs available, and a 32MHz clock input:
     // Generate a 65MHz clock using two PLLs.
@@ -110,6 +111,39 @@ module fpga_robots_game_clock(
     // asynchonous, and it's hard to synchronize them if we might not be
     // able to rely on our clock...
     assign locked = 1'd1;
+`endif // FPGA_ROBOTS_CLK_XS6_32
+`ifdef FPGA_ROBOTS_CLK_XS6_50
+    // For Pepino, and other boards with a Xilinx Spartan-6, one
+    // or more PLLs available, and a 50MHz clock input:
+    // Generate a 65MHz clock using one PLL.
+    //      pll1: 50MHz -> 65MHz; oscillator 650MHz; ratio 13/10
+
+    wire fb1; // feedback within PLL
+    wire ocub1; // unbuffered output clock from PLL
+
+    BUFG outbuf1(.I(ocub1), .O(oclk));
+
+    PLL_BASE #(
+        //  pll1: 50MHz -> 65MHz; oscillator 650Hz; ratio 13/10
+        .CLKIN_PERIOD(20.00), // 20.000 ns means 50MHz, input clock frequency
+        .DIVCLK_DIVIDE(1),    // feed 50MHz to the PLL input
+        .CLKFBOUT_MULT(13),   // run the VCO at 50*13=650Hz (ideal seems to be
+                              // a little over 400MHz)
+        .CLKOUT0_DIVIDE(10)   // and give output 0, 650MHz / 10 = 65MHz
+    ) pll1 (
+        .CLKIN(iclk),         // input clock
+        .CLKOUT0(ocub1),      // output clock
+        .CLKFBIN(fb1),        // feedback to keep the PLL running
+        .CLKFBOUT(fb1),
+        .RST(1'd0)            // I guess you need to keep it from
+                              // resetting itself...
+    );
+
+    // fake "locked" signal, we could use the two "LOCKED" outputs but they're
+    // asynchonous, and it's hard to synchronize them if we might not be
+    // able to rely on our clock...
+    assign locked = 1'd1;
+`endif // FPGA_ROBOTS_CLK_XS6_50
 `endif // !__ICARUS__
 
     parameter BAUDCTR_STEP = 19'd929; // appropriate for 65MHz

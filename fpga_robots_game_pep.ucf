@@ -1,0 +1,61 @@
+# UCF file for FPGA robots game, on the Pepino board.
+
+# Based on:
+# UCF file for the Pepino board.
+
+NET "*" IOSTANDARD=LVCMOS33;
+CONFIG VCCAUX = "3.3" ;
+
+# 50 MHz oscillator
+NET "board_clk"    LOC = "J16";
+NET "board_clk"    TNM_NET = "osc";
+TIMESPEC "TS_osc" = PERIOD "osc" 20.000ns;
+
+# flash chip - not used
+
+# tactile switch - used for logic reset
+NET "i_reset"      LOC = "K14" | PULLDOWN;
+
+# green LEDs - one used for indicating design is loaded, others not used
+NET "board_led"    LOC = "N16";
+
+# serial interface over USB via the FTDI chip
+# only the RX&TX signals are used; the RTS/CTS ones are not
+NET "serial_tx"    LOC = "B16"; # transmit data (output to FTDI chip)
+NET "serial_rx"    LOC = "B15"; # receive data (input from FTDI chip)
+
+# DIP switches - not used
+
+# SRAM - not used
+
+# video output (VGA)
+#                  #
+NET "o_hsync"      LOC = D11;
+NET "o_vsync"      LOC = E11;
+NET "o_video_r<1>" LOC = B10;
+NET "o_video_r<2>" LOC = A10;
+NET "o_video_r<3>" LOC = C11;
+NET "o_video_g<1>" LOC = A11;
+NET "o_video_g<2>" LOC = B12;
+NET "o_video_g<3>" LOC = A12;
+NET "o_video_b<2>" LOC = C13;
+NET "o_video_b<3>" LOC = A13;
+
+# PS/2 keyboard (pepino.ucf has this as mouse, but matching the pins against
+# the schematic and the silkscreening, it's the one labelled "keyboard")
+NET "ps2a_clk"     LOC = "C9" | PULLUP;
+NET "ps2a_dat"     LOC = "A9" | PULLUP;
+
+# PS/2 mouse - not used
+
+# sd-card native SD 4x-wide interface - not used
+
+# SPI (SD-Card) - not used
+
+# SPI (Network, J7) - not used
+
+# audio
+NET "o_audio_l"    LOC = "K15";
+NET "o_audio_r"    LOC = "K16";
+
+# general-purpose I/O port (J8) - not used

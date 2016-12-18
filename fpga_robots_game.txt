@@ -50,6 +50,8 @@ Easiest is to use the same equipment I used, namely:
         This is not the latest version of the Xilinx toolset, but it's
         one which works for the Papilio Pro board.
 
+It's also been ported to another board, the Pepino from Saanlima.
+
 To adapt it to different equipment would require some coding.  It should
 be practical for someone who's worked with FPGA's, is tolerably familiar
 with the FPGA they're porting it to, and is willing to get somewhat familiar
@@ -62,6 +64,21 @@ To build it for the Papilio Pro + Papilio Arcade combination:
     + Add the source files to the project:
         fpga_robots_game.v
         fpga_robots_game.ucf
+        all the other files that have the .v suffix
+    + Build it, through the "Generate Programming File" stage
+    + Load the resulting file (which has the .bit suffix) onto the FPGA
+
+To build it for the Pepino board from Saanlima:
+    + Edit fpga_robots_game_config.v, to:
+        - disable FPGA_ROBOTS_VIDEO444
+        - enable FPGA_ROBOTS_VIDEO332 (for Pepino's 8-bit video)
+        - disable FPGA_ROBOTS_CLK_XS6_32
+        - enable FPGA_ROBOTS_CLK_XS6_50 (for Pepino's 50MHz clock)
+    + Start Xilinx ISE
+    + Create an ISE project
+    + Add the source files to the project:
+        fpga_robots_game.v
+        fpga_robots_game_pep.ucf
         all the other files that have the .v suffix
     + Build it, through the "Generate Programming File" stage
     + Load the resulting file (which has the .bit suffix) onto the FPGA
@@ -211,6 +228,12 @@ Files:
         combination of the Papilio Pro with the Papilio Arcade MegaWing.
         For any other hardware you'll probably need to replace this file
         with a different one.
+    fpga_robots_game_pep.ucf
+        A "constraints file" for Xilinx ISE.  Most importantly, it maps
+        the named input/output signals found in fpga_robots_game.v to
+        the actual pins on the FPGA.  It's specific to the Pepino
+        board.  For any other hardware you'll probably need to replace this
+        file with a different one.
     fpga_robots_game_config.v
         Edit this file to enable/disable various features of the game
         at build time.
@@ -356,7 +379,10 @@ to look:
     To make it work on other "MegaWing" I/O boards with the Papilio Pro
     FPGA board:
         Edit or replace fpga_robots_game.ucf and rebuild in Xilinx ISE
-        (or other FPGA tools).
+        (or other FPGA tools).  Edit fpga_robots_game_config.v
+        to enable FPGA_ROBOTS_VIDEO322 and disable
+        FPGA_ROBOTS_VIDEO444 if your I/O board has 8 bit video instead
+        of the 12 bit video of the Papilio Arcade MegaWing.
     To make it work with other FPGAs:
         This is a bigger task.  I recommend being familiar with your
         FPGA and the vendor tools for it, and being prepared to spend
@@ -567,6 +593,10 @@ modify.  Interesting areas where someone could improve it are:
 Gadget Factory - designers and makers of the Papilio board, which was used
 in developing this project.
     http://papilio.cc
+
+Saanlima - designers and makers of the Pepino board, to which this project
+has been ported:
+    http://www.saanlima.com
 
 A GUI robots game is included as part of the GNOME Games software package,
 available on Linux and other systems:

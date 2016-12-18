@@ -36,9 +36,16 @@ module fpga_robots_game(
     input board_clk, // original clock signal
     output board_led, // light emitting diode used for signalling
     input i_reset, // reset pushbutton switch
+`ifdef FPGA_ROBOTS_VIDEO444 // 12 bit color
     output [3:0]o_video_r, // video output
     output [3:0]o_video_g,
     output [3:0]o_video_b,
+`endif
+`ifdef FPGA_ROBOTS_VIDEO332 // 8 bit color
+    output [3:1]o_video_r, // video output
+    output [3:1]o_video_g,
+    output [3:2]o_video_b,
+`endif
     output o_vsync,
     output o_hsync,
     input serial_rx, // serial port with host (perhaps over USB)
@@ -141,10 +148,16 @@ module fpga_robots_game(
         , .vbi(vbi)
     );
 
-    // convert 6 bit to 12 bit color
+    // convert 6 bit to 8 or 12 bit color
+`ifdef FPGA_ROBOTS_VIDEO444 // 12 bit color
     assign o_video_r[1:0] = o_video_r[3:2];
     assign o_video_g[1:0] = o_video_g[3:2];
     assign o_video_b[1:0] = o_video_b[3:2];
+`endif
+`ifdef FPGA_ROBOTS_VIDEO332 // 8 bit color
+    assign o_video_r[1] = o_video_r[3];
+    assign o_video_g[1] = o_video_g[3];
+`endif
 
     // Audio output.  We can do a nice sine wave or an ugly but simple
     // (and familiar) square wave.
