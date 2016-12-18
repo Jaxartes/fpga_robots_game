@@ -87,6 +87,10 @@ I could have saved you some work in the above steps by including the
 .gise and .xise files from my own ISE project, but I'm not sure it's safe
 for me to do so due to the Xilinx copyright notice in those files.
 
+When hooking up the keyboard, be sure to plug it into the right port:
+"PS/2 A" on Papilio Arcade; "KBD" on Pepino.  The other PS/2 port on the
+board is ignored.
+
 ### Playing the game
 
 If everything is hooked up and initialized properly, what you'll see
