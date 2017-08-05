@@ -52,15 +52,24 @@ module ps2(
             tx_reset_sema[0] <= ~tx_reset_sema[1];
 
     // Now oversample the data & clock lines & take the average of 5 samples.
-    // And take 2 more samples for synchronization.
-    reg [6:0] datosa = 7'd0, clkosa = 7'd0;
+    // And take 3 more samples for synchronization.
+    reg [2:0] datsyn = 3'd0, clksyn = 3'd0;
+    reg [6:2] datosa = 5'd0, clkosa = 5'd0;
     always @(posedge clk)
         if (rst) begin
-            datosa <= 7'd0;
-            clkosa <= 7'd0;
+            datsyn <= 3'd7;
+            clksyn <= 3'd7;
+        end else begin
+            datsyn <= { datsyn[1:0], ps2dat };
+            clksyn <= { clksyn[1:0], ps2clk };
+        end
+    always @(posedge clk)
+        if (rst) begin
+            datosa <= 5'd31;
+            clkosa <= 5'd31;
         end else if (sixus) begin
-            datosa <= { datosa[5:0], ps2dat };
-            clkosa <= { clkosa[5:0], ps2clk };
+            datosa <= { datosa[5:2], datsyn[2] };
+            clkosa <= { clkosa[5:2], clksyn[2] };
         end
     wire datin, clkin;
     avg5 datavg(datin, datosa[6:2]);
@@ -104,7 +113,7 @@ module ps2(
                     //      rxsr[9] holds the parity bit (odd parity)
                     //      datin holds the stop bit (1)
                     // clear the shift register
-                    rxsr <= { datin, 9'd511 };
+                    rxsr <= 10'd1023;
 
                     // let the downstream code know that we've RX'ed a byte
                     ps2_rx_dat <= rxsr[8:1];
@@ -112,7 +121,8 @@ module ps2(
                 end
             end
             xtrig <= clkfall ? 3'd1 : { xtrig[1:0], 1'b0 };
-        end
+        end else
+            ps2_rx_stb <= 1'd0;
 
     // TX: Transmission of bytes from the host to the peripheral.  The only
     // byte we transmit is a reset (0xff).
@@ -130,6 +140,7 @@ module ps2(
     assign suppress_rx = tx_going; // no RX while any TX is happening
     wire tx_initiate = txctr >= 12; // pull ps2clk down to initiate
     wire tx_transmit = txctr >= 2 && txctr <= 11; // operate ps2dat
+    wire tx_transmit_ex = tx_transmit || txctr == 12; // pull ps2dat down
     wire tx_waitack = txctr == 1; // expecting acknowledgement
     wire [4:0] txctr_minus_1 = txctr - 1;
     always @(posedge clk)
@@ -139,11 +150,11 @@ module ps2(
             tx_reset_sema[1] <= 1'd0; // start with nothing in transmit FIFO
         end else if (tx_initiate && sixus)
             txctr <= txctr_minus_1; // countdown to start
-        else if (tx_transmit && sixus && xtrig[2]) begin
+        else if (tx_transmit && sixus && clkfall) begin
             // transmitting a bit
             txctr <= txctr_minus_1; // countdown to next bit
             txsr <= { 1'b1, txsr[9:1] }; // shift out a bit
-        end else if (tx_waitack && sixus && xtrig[2]) begin
+        end else if (tx_waitack && sixus && clkfall) begin
             // acknowledgement bit
             txctr <= txctr_minus_1;
         end else if ((tx_reset_sema[0] != tx_reset_sema[1]) && !tx_going) begin
@@ -155,7 +166,7 @@ module ps2(
             tx_reset_sema[1] <= tx_reset_sema[0]; // no longer waiting
         end
     assign ps2clk = tx_initiate ? 1'b0 : 1'bz;
-    assign ps2dat = (tx_transmit && !txsr[0]) ? 1'b0 : 1'bz;
+    assign ps2dat = (tx_transmit_ex && !txsr[0]) ? 1'b0 : 1'bz;
 endmodule
 
 // avg5() -- average of 5 input bits.  Should compact into a LUT5 (half
